@@ -183,6 +183,10 @@ GameUI.createUISprite = function(cantkWidget, x, y, width, height, onClose, init
 	sprite.setAnchorX(0);
 	sprite.setAnchorY(0);
 
+	if(sprite.onCreated) {
+		sprite.onCreated();
+	}
+
 	return sprite;
 };
 

@@ -615,6 +615,10 @@ GameUI.Animation = function(sprite) {
 			onStart();
 		}
 
+		if(sprite.onStartAnimation) {
+			sprite.onStartAnimation();
+		}
+
 		sprite.setDisableRepaint(true);
 		sprite.updateTransform = function() {
 			var updateTransform = me.updateTransform;
@@ -626,6 +630,9 @@ GameUI.Animation = function(sprite) {
 
 				sprite.setDisableRepaint(false);
 				me.restoreSpriteState();
+				if(sprite.onEndAnimation) {
+					sprite.onEndAnimation();
+				}
 			}
 			else {
 				updateTransform.call(this);
@@ -1038,6 +1045,10 @@ GameUI.createUISprite = function(cantkWidget, x, y, width, height, onClose, init
 	sprite.enableInput();
 	sprite.setAnchorX(0);
 	sprite.setAnchorY(0);
+
+	if(sprite.onCreated) {
+		sprite.onCreated();
+	}
 
 	return sprite;
 };

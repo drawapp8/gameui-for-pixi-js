@@ -93,6 +93,10 @@ GameUI.Animation = function(sprite) {
 			onStart();
 		}
 
+		if(sprite.onStartAnimation) {
+			sprite.onStartAnimation();
+		}
+
 		sprite.setDisableRepaint(true);
 		sprite.updateTransform = function() {
 			var updateTransform = me.updateTransform;
@@ -104,6 +108,9 @@ GameUI.Animation = function(sprite) {
 
 				sprite.setDisableRepaint(false);
 				me.restoreSpriteState();
+				if(sprite.onEndAnimation) {
+					sprite.onEndAnimation();
+				}
 			}
 			else {
 				updateTransform.call(this);
