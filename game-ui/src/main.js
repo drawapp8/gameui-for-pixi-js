@@ -97,7 +97,6 @@ GameUI.loadScene = function(windowName, onSpriteCreate, initData) {
 		GameUI.stage.addChild(bgSprite);
 	}
 
-	GameUI.windows.push(win);
 	var n = win.children.length;
 	for(var i = 0; i < n; i++) {
 		var iter = win.children[i];

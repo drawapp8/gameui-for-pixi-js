@@ -86,7 +86,12 @@ Adapter.init = function() {
 		}
 		
 		sprite.getViewScale = function() {
-			return 1;
+			var canvas = GameUI.view;
+
+			var realWidth = parseInt(canvas.style.width);
+			var scale = realWidth/canvas.width;
+
+			return scale;
 		}
 
 		sprite.getX = function() {

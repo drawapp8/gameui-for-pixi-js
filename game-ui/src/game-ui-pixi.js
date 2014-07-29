@@ -98,7 +98,6 @@ GameUI.loadScene = function(windowName, onSpriteCreate, initData) {
 		GameUI.stage.addChild(bgSprite);
 	}
 
-	GameUI.windows.push(win);
 	var n = win.children.length;
 	for(var i = 0; i < n; i++) {
 		var iter = win.children[i];
@@ -315,7 +314,12 @@ Adapter.init = function() {
 		}
 		
 		sprite.getViewScale = function() {
-			return 1;
+			var canvas = GameUI.view;
+
+			var realWidth = parseInt(canvas.style.width);
+			var scale = realWidth/canvas.width;
+
+			return scale;
 		}
 
 		sprite.getX = function() {
@@ -624,12 +628,13 @@ GameUI.Animation = function(sprite) {
 			var updateTransform = me.updateTransform;
 
 			if(!me.step()) {
+				sprite.setDisableRepaint(false);
+				me.restoreSpriteState();
+				
 				if(onEnd) {
 					onEnd();
 				}
 
-				sprite.setDisableRepaint(false);
-				me.restoreSpriteState();
 				if(sprite.onEndAnimation) {
 					sprite.onEndAnimation();
 				}
@@ -831,7 +836,11 @@ CanTK.UIElement.prototype.closeWindow = function(retInfo) {
 			if(win) {
 				win.callOnClose(retInfo);
 			}
-			GameUI.stage.removeChild(view);
+
+			setTimeout(function() {
+				GameUI.stage.removeChild(view);
+				view.onRemoved();
+			}, 0);
 		});
 	}
 	else {
@@ -839,6 +848,7 @@ CanTK.UIElement.prototype.closeWindow = function(retInfo) {
 			win.callOnClose(retInfo);
 		}
 		GameUI.stage.removeChild(view);
+		view.onRemoved();
 	}
 
 	return;
@@ -917,11 +927,11 @@ GameUI.createUISprite = function(cantkWidget, x, y, width, height, onClose, init
 	}
 
 	sprite.getMoveDeltaX = function() {
-		return this.deltaX;
+		return this.deltaMovedX;
 	}
 
 	sprite.getMoveDeltaY = function() {
-		return this.deltaY;
+		return this.deltaMovedY;
 	}
 
 	sprite.getMoveAbsDeltaX = function() {
@@ -992,8 +1002,8 @@ GameUI.createUISprite = function(cantkWidget, x, y, width, height, onClose, init
 
 	sprite.handlePointerMove = function(point) {
 		if(this.lastPointerPosition) {
-			this.deltaX = point.x - this.lastPointerPosition.x;
-			this.deltaY = point.y - this.lastPointerPosition.y;
+			this.deltaMovedX = point.x - this.lastPointerPosition.x;
+			this.deltaMovedY = point.y - this.lastPointerPosition.y;
 		}
 		this.lastPointerPosition = point;
 		
@@ -1005,8 +1015,8 @@ GameUI.createUISprite = function(cantkWidget, x, y, width, height, onClose, init
 	}
 
 	sprite.handlePointerDown = function(point) {
-		this.deltaX = 0;
-		this.deltaY = 0;
+		this.deltaMovedX = 0;
+		this.deltaMovedY = 0;
 		this.pointerDownPosition = point;
 		this.lastPointerPosition = point;
 		
@@ -1016,14 +1026,19 @@ GameUI.createUISprite = function(cantkWidget, x, y, width, height, onClose, init
 	}
 	
 	sprite.handlePointerUp = function(point) {
-		this.deltaX = point.x - this.lastPointerPosition.x;
-		this.deltaY = point.y - this.lastPointerPosition.y;
+		this.deltaMovedX = point.x - this.lastPointerPosition.x;
+		this.deltaMovedY = point.y - this.lastPointerPosition.y;
 
 		this.lastPointerPosition = point;
 		
 		this.widget.onPointerUp(point);
 
 		return;
+	}
+
+	if(!sprite.onRemoved) {
+		sprite.onRemoved = function() {
+		}
 	}
 
 	if(sprite.widget.isUIWindow) {
