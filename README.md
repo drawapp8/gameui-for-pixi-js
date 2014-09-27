@@ -21,5 +21,5 @@ Documentation
 UI Editor
 --------------------
 
-[Game Builder](http://gamebuilder.duapp.com/appedit.php) is an online Game UI Builder.
+[Game Builder](http://gamebuilder.duapp.com) is an online Game UI Builder.
 
