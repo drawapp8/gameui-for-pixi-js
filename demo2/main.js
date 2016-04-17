@@ -1,45 +1,20 @@
-function gameStart() {
-	// the second parameter is interactivity...
-	var interactive = true;
-	var stage = new PIXI.Stage(0x000000, interactive);
-
-	// create a renderer instance.
-	var renderer = PIXI.autoDetectRenderer(480, 800);
-
-	// add the renderer view element to the DOM
+var game;
+function gameStart() {	
+	var renderer = PIXI.autoDetectRenderer(480, 854,{backgroundColor : 0x1099bb});
 	document.body.appendChild(renderer.view);
+
+	var stage = new PIXI.Container();
+
+	game = {stage:stage, width:renderer.width, height:renderer.height};
+	PIXI.CanTK.init(game, guiData);
+	PIXI.CanTK.loadScene("win-main", 0, 0, stage.width, stage.height);
 	
-	GameUI.init(PIXI, stage, guiData, renderer.view);
-
-	requestAnimFrame(animate);
-
-	// create a background..
-	var background = PIXI.Sprite.fromImage("bg.jpg");
-
-	// add background to stage...
-	stage.addChild(background);
-
-	loadScene("win-main");
-
+	animate();
 	function animate() {
-	    // render the stage
-	    renderer.render(stage);
-
-	    requestAnimFrame(animate);	    
+		requestAnimationFrame(animate);
+		renderer.render(stage);
 	}
-
-	// add a logo!
-	var pixiLogo = PIXI.Sprite.fromImage("pixi.png");
-	stage.addChild(pixiLogo);
-
-	pixiLogo.buttonMode = true;
-	pixiLogo.position.x = renderer.view.width - 56;
-	pixiLogo.position.y = 0;
-
-	pixiLogo.click = pixiLogo.tap = function() {
-		window.open("http://www.pixijs.com", '_blank');
-	};
 }
 
-window.onload = gameStart;
+window.onload = gameStart();
 

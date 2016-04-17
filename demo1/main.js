@@ -1,45 +1,70 @@
-function gameStart() {
-	// the second parameter is interactivity...
-	var interactive = true;
-	var stage = new PIXI.Stage(0x000000, interactive);
-
-	// create a renderer instance.
-	var renderer = PIXI.autoDetectRenderer(480, 800);
-
-	// add the renderer view element to the DOM
+var game;
+var choosedLabel;
+function gameStart() {	
+	var renderer = PIXI.autoDetectRenderer(480, 854,{backgroundColor : 0x1099bb});
 	document.body.appendChild(renderer.view);
+
+	// create the root of the scene graph
+	var stage = new PIXI.Container();
+
+	game = {stage:stage, width:renderer.width, height:renderer.height};
+	PIXI.CanTK.init(game, guiData);
+	var sprite = PIXI.Sprite.fromImage('assets/bunny.png');
 	
-	GameUI.init(PIXI, stage, guiData, renderer.view);
+	var sprite = new PIXI.Text('Open Dialog',{fill : '#555555', font : '32px Arial'});
+	sprite.position.set(240, 200);
+	sprite.anchor.x = 0.5;
+	sprite.anchor.y = 0.5;
+	sprite.interactive = true;
+	sprite.on('click', onOpenDialog);
+	sprite.on('tap', onOpenDialog);
+	stage.addChild(sprite);
+	
+	sprite = new PIXI.Text('Open Window',{fill : '#555555', font : '32px Arial'});
+	sprite.position.set(240, 300);
+	sprite.anchor.x = 0.5;
+	sprite.anchor.y = 0.5;
+	sprite.interactive = true;
+	sprite.on('click', onOpenWindow);
+	sprite.on('tap', onOpenWindow);
+	stage.addChild(sprite);
 
-	requestAnimFrame(animate);
+	sprite = new PIXI.Text('Choose',{fill : '#555555', font : '32px Arial'});
+	sprite.position.set(240, 400);
+	sprite.anchor.x = 0.5;
+	sprite.anchor.y = 0.5;
+	sprite.interactive = true;
+	sprite.on('click', onOpenDialog2);
+	sprite.on('tap', onOpenDialog2);
+	stage.addChild(sprite);
 
-	// create a background..
-	var background = PIXI.Sprite.fromImage("bg.jpg");
+	sprite = new PIXI.Text('Not Choose',{fill : '#555555', font : '32px Arial'});
+	sprite.position.set(0, renderer.height-30);
+	sprite.anchor.x = 0;
+	sprite.anchor.y = 0.5;
+	stage.addChild(sprite);
+	choosedLabel = sprite;
 
-	// add background to stage...
-	stage.addChild(background);
-
-	loadScene("win-main");
-
+	animate();
 	function animate() {
-	    // render the stage
-	    renderer.render(stage);
-
-	    requestAnimFrame(animate);	    
+		requestAnimationFrame(animate);
+		renderer.render(stage);
 	}
-
-	// add a logo!
-	var pixiLogo = PIXI.Sprite.fromImage("pixi.png");
-	stage.addChild(pixiLogo);
-
-	pixiLogo.buttonMode = true;
-	pixiLogo.position.x = renderer.view.width - 56;
-	pixiLogo.position.y = 0;
-
-	pixiLogo.click = pixiLogo.tap = function() {
-		window.open("http://www.pixijs.com", '_blank');
-	};
 }
 
-window.onload = gameStart;
+window.onload = gameStart();
 
+function onOpenDialog(button, pointer, isOver) {
+	PIXI.CanTK.openWindow("dialog", 0, 0, game.width, game.height);
+}
+
+function onOpenDialog2(button, pointer, isOver) {
+	function onReturn(ret) {
+		choosedLabel.setText("You Choosed " + ret);
+	}
+	PIXI.CanTK.openWindow("selectorDialog", 0, game.height-300, game.width, 300, onReturn);
+}
+
+function onOpenWindow(button, pointer, isOver) {
+	PIXI.CanTK.openWindow("scene", 0, 0, game.width, game.height);
+}

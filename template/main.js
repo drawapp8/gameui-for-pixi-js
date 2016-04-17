@@ -1,45 +1,30 @@
-function gameStart() {
-	// the second parameter is interactivity...
-	var interactive = true;
-	var stage = new PIXI.Stage(0x000000, interactive);
-
-	// create a renderer instance.
-	var renderer = PIXI.autoDetectRenderer(480, 800);
-
-	// add the renderer view element to the DOM
+function gameStart() {	
+	var renderer = PIXI.autoDetectRenderer(480, 854,{backgroundColor : 0x1099bb});
 	document.body.appendChild(renderer.view);
-	
-	GameUI.init(PIXI, stage, guiData, renderer.view);
 
-	requestAnimFrame(animate);
+	// create the root of the scene graph
+	var stage = new PIXI.Container();
 
-	// create a background..
-	var background = PIXI.Sprite.fromImage("bg.jpg");
+	var sprite = PIXI.Sprite.fromImage('assets/bunny.png');
+	sprite.position.set(230,264);
+	sprite.anchor.x = 0.5;
+	sprite.anchor.y = 0.5;
+	sprite.interactive = true;
+	sprite.on('click', onDown);
+	sprite.on('tap', onDown);
 
-	// add background to stage...
-	stage.addChild(background);
+	stage.addChild(sprite);
 
-	loadScene("win-main");
-
-	function animate() {
-	    // render the stage
-	    renderer.render(stage);
-
-	    requestAnimFrame(animate);	    
+	// scale the sprite up every time it is clicked/touched
+	function onDown (eventData) {
 	}
-
-	// add a logo!
-	var pixiLogo = PIXI.Sprite.fromImage("pixi.png");
-	stage.addChild(pixiLogo);
-
-	pixiLogo.buttonMode = true;
-	pixiLogo.position.x = renderer.view.width - 56;
-	pixiLogo.position.y = 0;
-
-	pixiLogo.click = pixiLogo.tap = function() {
-		window.open("http://www.pixijs.com", '_blank');
-	};
+	
+	animate();
+	function animate() {
+		requestAnimationFrame(animate);
+		renderer.render(stage);
+	}
 }
 
-window.onload = gameStart;
+window.onload = gameStart();
 
