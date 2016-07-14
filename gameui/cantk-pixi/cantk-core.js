@@ -477,6 +477,41 @@ CantkRT.getMainCanvas = function() {
 	return canvas;
 }
 
+CantkRT.mainCanvasW = 0;
+CantkRT.mainCanvasH = 0;
+CantkRT.mainCanvasScale = {x:1, y:1};
+CantkRT.mainCanvasPostion = {x:0, y:0};
+
+CantkRT.moveMainCanvas = function(x, y) {
+	var canvas = CantkRT.getMainCanvas();
+	canvas.style.position = "absolute";
+	canvas.style.top = y + "px";
+	canvas.style.left = x + "px";
+	CantkRT.mainCanvasPostion.x = x;
+	CantkRT.mainCanvasPostion.y = y;
+}
+
+CantkRT.resizeMainCanvas = function(w, h, styleW, styleH) {
+	var canvas = CantkRT.getMainCanvas();
+
+	canvas.width = w;
+	canvas.height = h;
+	canvas.style.width = styleW + "px";
+	canvas.style.height = styleH + "px";
+	CantkRT.mainCanvasW = w;
+	CantkRT.mainCanvasH = h;
+	CantkRT.mainCanvasScale.x = w/styleW;
+	CantkRT.mainCanvasScale.y = h/styleH;
+}
+
+CantkRT.getMainCanvasScale = function() {
+	return CantkRT.mainCanvasScale;
+}
+
+CantkRT.getMainCanvasPosition = function() {
+	return CantkRT.mainCanvasPostion;
+}
+
 CantkRT.isResSupportCrossOrgin = function(src) {
 	if(src && src.indexOf("file://") < 0 
 		&& src.indexOf("data:image") !== 0 
@@ -1592,7 +1627,6 @@ function cantkInitViewPort() {
 	meta.name = 'viewport';
 	meta.content = value;
 	head.appendChild(meta);
-	console.log("viewport: " + value);
 
 	return;
 }
@@ -1789,6 +1823,22 @@ String.prototype.extname = function() {
 
 String.prototype.dirname = function() {
 	return this.replace(/\\/g,'/').replace(/\/[^\/]*$/, '');
+}
+
+String.prototype.isLower = function() {
+	return /^[a-z]+$/.test(this); 
+}
+
+String.prototype.isUpper = function() {
+	return /^[A-Z]+$/.test(this); 
+}
+
+String.prototype.isDigit = function() {
+	return /^[0-9]+$/.test(this); 
+}
+
+String.prototype.isValidName = function() {
+	return /^[0-9]+$|^[A-Z]+$|^[a-z]+$|_/.test(this); 
 }
 
 function cantkIsFullscreen() {
@@ -4614,6 +4664,8 @@ TEventTarget.apply = function(obj) {
 	obj.addEventListener = TEventTarget.prototype.addEventListener;
 	obj.removeEventListener = TEventTarget.prototype.removeEventListener;
 	obj.resetEvents = TEventTarget.prototype.resetEvents;
+	obj.on = TEventTarget.prototype.on;
+	obj.off = TEventTarget.prototype.off;
 
 	return;
 }
@@ -4626,7 +4678,7 @@ TEventTarget.prototype.hasEventListener = function(type) {
 	return this.eventListeners && this.eventListeners[type] && this.eventListeners[type].length > 0;
 }
 
-TEventTarget.prototype.addEventListener = function(type, callback) {
+TEventTarget.prototype.on = TEventTarget.prototype.addEventListener = function(type, callback) {
 	if(!callback || !type) {
 		return;
 	}
@@ -4649,7 +4701,7 @@ TEventTarget.prototype.addEventListener = function(type, callback) {
 	return;
 }
 
-TEventTarget.prototype.removeEventListener = function(type, callback) {
+TEventTarget.prototype.off = TEventTarget.prototype.removeEventListener = function(type, callback) {
 	if(!this.eventListeners || !callback || !type) {
 		return;
 	}
@@ -4719,16 +4771,12 @@ ResLoader.reset = function() {
 
 ResLoader.toLoadInc = function(src) {
 	ResLoader.total++;
-//	console.log(ResLoader.total + " to load:" + src);
-
 	return;
 }
 
 ResLoader.loadedInc = function(src) {
-	ResLoader.finished++;
-//	console.log(ResLoader.finished + " loaded:" + src);
-
 	setTimeout(function() {
+		ResLoader.finished++;
 		ResLoader.notifyLoadProgress();
 	}, 1);
 
@@ -5149,11 +5197,13 @@ ResLoader.loadScript = function(src, force, onSuccess, onFail) {
 }
 
 ResLoader.loadFonts = function(fonts) {
-	if(CantkRT.isCantkRTV8()) {
-		return ResLoader.loadFontsRT(fonts);
-	}
-	else {
-		return ResLoader.loadFontsWeb(fonts);
+	if(fonts && fonts.length) {
+		if(CantkRT.isCantkRTV8()) {
+			return ResLoader.loadFontsRT(fonts);
+		}
+		else {
+			return ResLoader.loadFontsWeb(fonts);
+		}
 	}
 }
 
@@ -5169,6 +5219,8 @@ ResLoader.loadFontsRT = function(fonts) {
 
 ResLoader.loadFontsWeb = function(fonts) {
 	var styleStr = "";
+	var families = [];
+	ResLoader.toLoadInc();
 	for(var i = 0; i < fonts.length; i++) {
 		var iter = fonts[i];
 		var name = iter.basename(true);
@@ -5191,6 +5243,7 @@ ResLoader.loadFontsWeb = function(fonts) {
 			fontFaceStr += str;
 			fontFaceStr += "}\n";
 			styleStr += fontFaceStr;
+			families.push(name);
 	}
 
 	var style = document.createElement("style");
@@ -5201,6 +5254,13 @@ ResLoader.loadFontsWeb = function(fonts) {
 	style.innerHTML = styleStr;
 	document.head.appendChild(style);
 	console.log(styleStr);
+
+	onFontsLoad(families, function(error) {
+		ResLoader.loadedInc();
+		if(error) {
+			console.log(JSON.stringify(error));
+		}
+	});
 
 	return;
 }
@@ -5396,24 +5456,42 @@ BitmapFont.prototype.getFontInfo  = function() {
  * File: w_image.js
  * Author:  Li XianJing <xianjimli@hotmail.com>
  * Brief: image adapter
- * 
+ *
  * Copyright (c) 2011 - 2015  Li XianJing <xianjimli@hotmail.com>
- * 
+ *
  */
 
 function WImage(src, onLoad) {
-	if(src) {
-		this.setImageSrc(src, onLoad);
-	}
+	this.src = src;
+   	this.onLoadCallback = [];
+	this.image = WImage.nullImage;
+   	this.setSizeInfo(0, 0, 0, 0, false, false, 0, 0, 0, 0);
+	this.setImageSrc(src, onLoad);
 
 	return;
 }
 
-WImage.nullImage = new Image();
-WImage.nullWImage = new WImage();
-WImage.onload = function() {  }
+WImage.prototype.setSizeInfo = function(x, y, w, h, rotated, trimmed, ox, oy, rw, rh) {
+	this.rect = {x:x >> 0, y:y >> 0, w:w >> 0, h:h >> 0, rotated:rotated, trimmed:trimmed, ox:ox >> 0, oy:oy >> 0, rw:rw >> 0, rh:rh >> 0};
+}
 
-WImage.prototype.initFromJson = function(src, json, onLoad) {
+WImage.prototype.appendOnLoadCallback = function(onLoad) {
+    if(onLoad){
+        this.onLoadCallback.push(onLoad);
+    }
+}
+
+WImage.prototype.notifyLoadDone = function(img) {
+	this.image = img;
+	var callbacks = this.onLoadCallback;
+
+	for(var i = 0, j = callbacks.length; i < j; i++){
+		callbacks[i](img);
+	}
+	this.onLoadCallback.length = 0;
+}
+
+WImage.prototype.initFromJson = function(src, json) {
 	var sharpOffset = src.indexOf("#");
 	var jsonURL = src.substr(0, sharpOffset);
 	var name = src.substr(sharpOffset+1);
@@ -5434,136 +5512,132 @@ WImage.prototype.initFromJson = function(src, json, onLoad) {
 		return;
 	}
 
-	this.rotated = info.rotated;
 	if(info.trimmed) {
-		rect.trimmed = true;
-		rect.ox = info.spriteSourceSize.x;
-		rect.oy = info.spriteSourceSize.y;
-		rect.rw = info.sourceSize.w;
-		rect.rh = info.sourceSize.h;
+		this.setSizeInfo(rect.x, rect.y, rect.w, rect.h, info.rotated,
+			true, info.spriteSourceSize.x, info.spriteSourceSize.y, info.sourceSize.w, info.sourceSize.h);;
 	}
 	else {
-		rect.trimmed = false;
-		rect.ox = 0;
-		rect.oy = 0;
-		rect.rw = 0;
-		rect.rh = 0;
+		this.setSizeInfo(rect.x, rect.y, rect.w, rect.h, info.rotated,
+			false, 0, 0, rect.w, rect.h);
 	}
 
 	var me = this;
-	this.rect = rect;
-	WImage.onload();
 	ResLoader.loadImage(imageSrc, function(img) {
-		me.image = img;
-		if(onLoad) {
-			onLoad(img);
-		}
+		me.notifyLoadDone(img);
 	});
 
 	return;
 }
 
-WImage.prototype.initFromRowColIndex = function(src, rowcolIndex, onLoad) {
+WImage.prototype.initFromRowColIndex = function(src, rowcolIndex) {
 	var me = this;
 	var rows = parseInt(rowcolIndex[1]);
 	var cols = parseInt(rowcolIndex[2]);
 	var index = parseInt(rowcolIndex[3]);
-	rowcolIndex = null;
 
-	this.image = ResLoader.loadImage(src, function(img) {
+	ResLoader.loadImage(src, function(img) {
 		var tileW = Math.round(img.width/cols);
 		var tileH = Math.round(img.height/rows);
-		var tileWmin = Math.floor(img.width/cols);
-		var tileHmin = Math.floor(img.height/rows);
+		var w = Math.floor(img.width/cols);
+		var h = Math.floor(img.height/rows);
 		var col = index%cols;
 		var row = Math.floor(index/cols);
 
-		me.rect = {};
-		me.rect.x = col * tileW;
-		me.rect.y = row * tileH;
-		me.rect.w = tileWmin;
-		me.rect.h = tileHmin;
-
-		me.image = img;
-		if(onLoad) {
-			onLoad(img);
-		}
-		WImage.onload();
+		var x = col * tileW;
+		var y = row * tileH;
+		me.setSizeInfo(x, y, w, h, false, false, 0, 0, w, h);
+		me.notifyLoadDone(img);
 	});
+
+	rowcolIndex = null;
 
 	return;
 }
 
-WImage.prototype.initFromXYWH = function(src, xywh, onLoad) {
+WImage.prototype.initFromXYWH = function(src, xywh) {
 	var me = this;
 	var x = parseInt(xywh[1]);
 	var y = parseInt(xywh[2]);
 	var w = parseInt(xywh[3]);
 	var h = parseInt(xywh[4]);
-	xywh = null;
 
 	this.image = ResLoader.loadImage(src, function(img) {
-		me.rect = {};
-		me.rect.x = x;
-		me.rect.y = y;
-		me.rect.w = w;
-		me.rect.h = h;
-
-		me.image = img;
-		if(onLoad) {
-			onLoad(img);
-		}
-		WImage.onload();
+		me.setSizeInfo(x, y, w, h, false, false, 0, 0, w, h);
+		me.notifyLoadDone(img);
 	});
+	xywh = null;
 
 	return;
 }
 
 WImage.prototype.setImage = function(image) {
 	this.image = image;
-	
+
 	return this;
 }
 
-WImage.prototype.setImageSrc = function(src, onLoad) {
-	if(!src) {
-		this.src = src;
-		this.image = WImage.nullImage;
-
-		return;
-	}
-
-	if(src.indexOf("data:") === 0) {	
-		this.src = src;
-		this.rect = null;
-		this.image = CantkRT.createImage(src, onLoad);
-
-		return;
-	}
-
-	src = ResLoader.toAbsURL(src);
-	this.src = src;
-	
+WImage.prototype.initFromDataURL = function(src, onLoad) {
 	var me = this;
-	var sharpOffset = src.indexOf("#");
+	this.src = src;
+	this.image = CantkRT.createImage(src, function(img) {
+		me.setSizeInfo(0, 0, img.width, img.height, false, false, 0, 0, img.width, img.height);
+		me.notifyLoadDone(img);
+	});
+}
+
+WImage.prototype.setImageSrc = function(src, onLoad) {
+	this.appendOnLoadCallback(onLoad);
+
+	if(!src) {
+		this.notifyLoadDone(WImage.nullImage);
+		return;
+	}
+
+	if(src.indexOf("data:") === 0) {
+		this.initFromDataURL(src, onLoad);
+		return;
+	}
+
+	var me = this;
+	var url = ResLoader.toAbsURL(src);
+
+	this.src = url;
+	var sharpOffset = url.indexOf("#");
 	if(sharpOffset > 0) {
-		var meta = src.substr(sharpOffset+1);
+		var meta = url.substr(sharpOffset+1);
 		var rowcolIndex = meta.match(/r([0-9]+)c([0-9]+)i([0-9]+)/i);
 		var xywh = meta.match(/x([0-9]+)y([0-9]+)w([0-9]+)h([0-9]+)/i);
 
 		if(!rowcolIndex && !xywh) {
-			var jsonURL = src.substr(0, sharpOffset);
+			var jsonURL = url.substr(0, sharpOffset);
 			ResLoader.loadJson(jsonURL, function(json) {
-				me.initFromJson(src, json, onLoad);
+                if(Array.isArray(json)) {
+                    var find = false;
+                    var target = null;
+                    for(var i = 0; i < json.length; i++) {
+                        var frames = Object.keys(json[i].frames);
+                        find = frames.some(function(imagename) {
+                            if(imagename === meta) {
+                                target = json[i];
+                                return true;
+                            }
+                        });
+                        if(find) {
+                            break;
+                        }
+                    }
+                    return me.initFromJson(url, target || json, onLoad);
+                }
+				me.initFromJson(url, json, onLoad);
 			});
 		}
 		else {
-			src = src.substr(0, sharpOffset);
+			url = url.substr(0, sharpOffset);
 			if(rowcolIndex) {
-				this.initFromRowColIndex(src, rowcolIndex, onLoad);
+				this.initFromRowColIndex(url, rowcolIndex, onLoad);
 			}
 			if(xywh){
-				this.initFromXYWH(src, xywh, onLoad);
+				this.initFromXYWH(url, xywh, onLoad);
 			}
 
 			rowcolIndex = null;
@@ -5571,18 +5645,11 @@ WImage.prototype.setImageSrc = function(src, onLoad) {
 		}
 	}
 	else {
-		this.image = ResLoader.loadImage(src, function(img) {
-			me.rect = {};
-			me.rect.x = 0;
-			me.rect.y = 0;
-			me.rect.w = img.width;
-			me.rect.h = img.height;
-
-			me.image = img;
-			if(onLoad) {
-				onLoad(img);
-			}
-			WImage.onload();
+		this.image = ResLoader.loadImage(url, function(img) {
+			var w = img.width;
+			var h = img.height;
+			me.setSizeInfo(0, 0, w, h, false, false, 0, 0, w, h);
+			me.notifyLoadDone(img);
 		});
 	}
 
@@ -5590,15 +5657,6 @@ WImage.prototype.setImageSrc = function(src, onLoad) {
 }
 
 WImage.prototype.getImageRect = function() {
-	if(!this.rect) {
-		this.rect = {x:0, y:0, w:0, h:0};
-	}
-	
-	if((!this.rect.w) && this.image) {
-		this.rect.w = this.image.width;
-		this.rect.h = this.image.height;
-	}
-
 	return this.rect;
 }
 
@@ -5624,10 +5682,12 @@ WImage.prototype.getRealImageSrc = function() {
 	}
 }
 
-WImage.prototype.getImage = function() {
-	var image = this.image;
+WImage.prototype.isLoaded = function() {
+	return this.image && this.image.complete;
+}
 
-	return (image && image.width > 0) ? image : null;
+WImage.prototype.getImage = function() {
+	return this.image;
 }
 
 WImage.isValid = function(image) {
@@ -5635,6 +5695,10 @@ WImage.isValid = function(image) {
 }
 
 WImage.cache = {};
+WImage.nullImage = new Image();
+WImage.nullWImage = new WImage();
+WImage.nullWImage.image = null;
+
 WImage.clearCache = function(check) {
 	var newCache = {};
 	for(var key in WImage.cache) {
@@ -5657,38 +5721,41 @@ WImage.create = function(src, onLoad) {
 		return WImage.nullWImage;
 	}
 
-	src = ResLoader.toAbsURL(src);
-	var image = WImage.cache[src];
+	var url = ResLoader.toAbsURL(src);
+	var image = WImage.cache[url];
+
 	if(image) {
 		if(onLoad) {
-			onLoad(image.getImage());
+			var img = image.image;
+			if(img && img.complete) {
+				onLoad(img);
+			}else{
+                image.appendOnLoadCallback(onLoad)
+            }
 		}
 	}
 	else {
-		image = new WImage(src, onLoad);
-		WImage.cache[src] = image;
+		image = new WImage(url, onLoad);
+		WImage.cache[url] = image;
 	}
 
 	return image;
 }
 
 WImage.createWithImage = function(img) {
-	if(!img) {
-		return WImage.nullWImage;
-	}
+	var image = WImage.nullWImage;
 
-	var image = new WImage();
-	image.setImage(img);
+	if(img) {
+		if(img.src) {
+			return WImage.create(img.src);
+		}
+
+		image = new WImage();
+		image.setImage(img);
+		image.setSizeInfo(0, 0, img.width, img.height, false, false, 0, 0, img.width, img.height);
+	}
 
 	return image;
-}
-
-function cantkSetOnImageLoad(onImageLoad) {
-	if(onImageLoad) {
-		WImage.onload = onImageLoad;
-	}
-
-	return;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -5705,63 +5772,43 @@ WImage.DISPLAY_TILE_H = 8;
 WImage.DISPLAY_AUTO_SIZE_DOWN = 9;
 WImage.DISPLAY_FIT_WIDTH = 10;
 WImage.DISPLAY_FIT_HEIGHT = 11;
+WImage.DISPLAY_3PATCH_V = 12;
+WImage.DISPLAY_3PATCH_H = 13;
 
 WImage.prototype.draw = function(canvas, display, x, y, dw, dh) {
 	var image = this.getImage();
 	var srcRect = this.getImageRect();
 
-	return WImage.draw(canvas, image, display, x, y, dw, dh, srcRect);	
+	return WImage.draw(canvas, image, display, x, y, dw, dh, srcRect);
+}
+
+WImage.getImageRectDefault = function(image) {
+	return {x:0, y:0, w:image.width, h:image.height, trimmed:false};
 }
 
 WImage.draw = function(canvas, image, display, x, y, dw, dh, srcRect) {
-	if(!image || !dw || !dh) return;
-
-	if(!srcRect) {
-		srcRect = {};
-		srcRect.x = 0;
-		srcRect.y = 0;
-		srcRect.w = image.width;
-		srcRect.h = image.height;
-	}
-
-	if(!srcRect.ox) {
-		srcRect.ox = 0;
-	}
-	if(!srcRect.oy) {
-		srcRect.oy = 0;
-	}
-	if(!srcRect.rw) {
-		srcRect.rw = srcRect.w;
-	}
-	if(!srcRect.rh) {
-		srcRect.rh = srcRect.h;
-	}
-
-	var imageWidth  = srcRect.rw;
-	var imageHeight = srcRect.rh;
-
-	if(imageWidth <= 0 || imageHeight <= 0) {
-		return;
-	}
+	if(!image || !image.width) return;
 
 	var dx = 0;
 	var dy = 0;
-	var sw = srcRect.w;
-	var sh = srcRect.h;
-	var sx = srcRect.x;
-	var sy = srcRect.y;
-	var ox = srcRect.ox;
-	var oy = srcRect.oy;
+	var sr = srcRect || WImage.getImageRectDefault(image);
+	var sw = sr.w;
+	var sh = sr.h;
+	var sx = sr.x;
+	var sy = sr.y;
+	var ox = sr.ox || 0;
+	var oy = sr.oy || 0;
+	var imageWidth  = sr.rw || sr.w;
+	var imageHeight = sr.rh || sr.h;
 
-	if(srcRect.trimmed) {
-		ox = srcRect.ox;
-		oy = srcRect.oy;
-	}
+    if(imageHeight === 0 || imageWidth === 0) {
+        return;
+    }
 
 	switch(display) {
 		case WImage.DISPLAY_CENTER: {
-			dx = Math.floor(x + ((dw - imageWidth) >> 1)) + ox;
-			dy = Math.floor(y + ((dh - imageHeight) >> 1)) + oy;
+			dx = (x + ((dw - imageWidth) >> 1)) + ox;
+			dy = (y + ((dh - imageHeight) >> 1)) + oy;
 
 			canvas.drawImage(image, sx, sy, sw, sh, dx, dy, sw, sh);
 			break;
@@ -5773,10 +5820,10 @@ WImage.draw = function(canvas, image, display, x, y, dw, dh, srcRect) {
 
 			dx = x + ((dw - iw) >> 1);
 			dy = y + ((dh - ih) >> 1);
-			dx += Math.round(ox*scale);
-			dy += Math.round(oy*scale);
-			dw = Math.round(sw*scale);
-			dh = Math.round(sh*scale);
+			dx += (ox*scale);
+			dy += (oy*scale);
+			dw = (sw*scale);
+			dh = (sh*scale);
 
 			canvas.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
 			break;
@@ -5785,27 +5832,27 @@ WImage.draw = function(canvas, image, display, x, y, dw, dh, srcRect) {
 			var xScale = dw/imageWidth;
 			var yScale = dh/imageHeight;
 
-			dx = Math.round(x + ox*xScale);
-			dy = Math.round(y + oy*yScale);
-			dw = Math.round(sw*xScale);
-			dh = Math.round(sh*yScale);
+			dx = (x + ox*xScale);
+			dy = (y + oy*yScale);
+			dw = (sw*xScale);
+			dh = (sh*yScale);
 
 			canvas.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
 			break;
 		}
 		case WImage.DISPLAY_AUTO: {
 			var scale = Math.min(dw/imageWidth, dh/imageHeight);
-			var iw = Math.round(imageWidth*scale);
-			var ih = Math.round(imageHeight*scale);
+			var iw = (imageWidth*scale);
+			var ih = (imageHeight*scale);
 
 			dx = x + ((dw - iw) >> 1);
 			dy = y + ((dh - ih) >> 1);
-			dx += Math.round(ox*scale);
-			dy += Math.round(oy*scale);
+			dx += (ox*scale);
+			dy += (oy*scale);
 
-			dw = Math.round(sw*scale);
-			dh = Math.round(sh*scale);
-			
+			dw = (sw*scale);
+			dh = (sh*scale);
+
 			canvas.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
 			break;
 		}
@@ -5818,13 +5865,45 @@ WImage.draw = function(canvas, image, display, x, y, dw, dh, srcRect) {
 
 			break;
 		}
+        case WImage.DISPLAY_3PATCH_V:
+            dx = x + ox;
+            dy = y + oy;
+            dw -= (imageWidth - sw);
+			dh -= (imageHeight - sh);
+
+            dw = Math.max(dw, 0);
+            dh = Math.max(dh, 0);
+            var sstep = sh / 3;
+            var dstep = dh / 3;
+            var hc = Math.min(sstep, dstep);
+            canvas.drawImage(image, sx, sy, sw, sstep, dx, dy, dw, hc);
+            canvas.drawImage(image, sx, sy + sstep, sw, sstep, dx, dy + hc, dw, Math.max(dh - 2*sstep, dstep));
+            hc = hc + Math.max(dh - 2*sstep, dstep);
+            canvas.drawImage(image, sx, sy + 2*sstep, sw, sstep, dx, dy + hc, dw, Math.min(sstep, dstep));
+            break;
+        case WImage.DISPLAY_3PATCH_H:
+            dx = x + ox;
+            dy = y + oy;
+            dw -= (imageWidth - sw);
+			dh -= (imageHeight - sh);
+
+            dw = Math.max(dw, 0);
+            dh = Math.max(dh, 0);
+            var sstep = sw / 3;
+            var dstep = dw / 3;
+            var wc = Math.min(sstep, dstep);
+            canvas.drawImage(image, sx, sy, sstep, sh, dx, dy, wc, dh);
+            canvas.drawImage(image, sx + sstep, sy, sstep, sh, dx + wc, dy, Math.max(dw - 2*sstep, dstep), dh);
+            wc = wc + Math.max(dw - 2*sstep, dw / 3);
+            canvas.drawImage(image, sx + 2*sstep, sy, sstep, sh, dx + wc, dy, Math.min(sstep, dstep), dh);
+            break;
 		case WImage.DISPLAY_SCALE_KEEP_RATIO: {
 			var scale = Math.max(dw/imageWidth, dh/imageHeight);
-			
-			dx = Math.round(x + ox*scale);
-			dy = Math.round(y + oy*scale);
-			dw = Math.round(sw*scale);
-			dh = Math.round(sh*scale);
+
+			dx = (x + ox*scale);
+			dy = (y + oy*scale);
+			dw = (sw*scale);
+			dh = (sh*scale);
 
 			canvas.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
 
@@ -5879,10 +5958,10 @@ WImage.draw = function(canvas, image, display, x, y, dw, dh, srcRect) {
 		case WImage.DISPLAY_FIT_WIDTH: {
 			var scale = dw/imageWidth;
 
-			dx = Math.round(x + ox*scale);
-			dy = Math.round(y + oy*scale);
-			dw = Math.round(sw*scale);
-			dh = Math.round(sh*scale);
+			dx = (x + ox*scale);
+			dy = (y + oy*scale);
+			dw = (sw*scale);
+			dh = (sh*scale);
 
 			canvas.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
 
@@ -5891,10 +5970,10 @@ WImage.draw = function(canvas, image, display, x, y, dw, dh, srcRect) {
 		case WImage.DISPLAY_FIT_HEIGHT: {
 			var scale = dh/imageHeight;
 
-			dx = Math.round(x + ox*scale);
-			dy = Math.round(y + oy*scale);
-			dw = Math.round(sw*scale);
-			dh = Math.round(sh*scale);
+			dx = (x + ox*scale);
+			dy = (y + oy*scale);
+			dw = (sw*scale);
+			dh = (sh*scale);
 
 			canvas.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
 
@@ -7539,6 +7618,7 @@ WThemeManager.getThemeURL = function() {
 WThemeManager.getDefaultFont = function(themeJson) {
 	var font = null;
 	var global = themeJson.global;
+
 	if(global && global.font) {
 		if(browser.isWindows()) {
 			font = global.font.windows;
@@ -7550,6 +7630,8 @@ WThemeManager.getDefaultFont = function(themeJson) {
 			font = global.font.macosx;
 		}
 	}
+
+	console.log("Default font:" + JSON.stringify(font));
 
 	return font;
 }
@@ -7567,6 +7649,9 @@ WThemeManager.applyDefaultFont = function(style, defaultFont) {
 		}
 
 		if(!font.weight) {
+			font.weight = "normal";
+		}else{
+			font.size += 2;
 			font.weight = "normal";
 		}
 	}
@@ -8128,7 +8213,132 @@ WebStorage.dump = function() {
 	}
 }
 
-/*
+var context = window;
+
+(function() {
+	
+	var origWidth = null,
+		origHeight = null,
+		testDiv = null;
+	
+	/**
+	 * This function waits until all specified font-families loaded and rendered and then executes the callback function.
+	 * It doesn't add font-families to the document, all font-families should be added to the document elsewhere.
+	 * If after specific threshold time fonts won't be loaded, the callback function will be invoked with an error.
+	 * 
+	 * The callback function is invoked with a single error parameter.
+	 * If all fonts were loaded then this parameter will be null. Otherwise, object with message in the "message" field
+	 * and array in "notLoadedFontFamilies" field with all not loaded font-families will be returned.
+	 * 
+	 * @param {Array}    fontFamiliesArray   Array of font-families to load
+	 * @param {Function} fontsLoadedCallback Callback function to call after all font-families loaded
+	 * @param {Object}   [options]           Optional object with "maxNumOfTries" and "tryIntervalMs" properties.
+	 * @return {Object}
+	 */
+	this.onFontsLoad = function onFontsLoad(fontFamiliesArray, fontsLoadedCallback, options) {
+		var testContainer, clonedDiv,
+			notLoadedFontFamilies = [],
+			referenceFontFamily = "serif",
+			i, interval,
+			callbackParameter,
+			tryCount = 0,
+			maxNumOfTries = 10,
+			tryIntervalMs = 250;
+		
+		function testDivDimensions() {
+			var i, testDiv;
+			for (i = testContainer.childNodes.length - 1; i >= 0; i--) {
+				testDiv = testContainer.childNodes[i];
+				if (testDiv.offsetWidth !== origWidth || testDiv.offsetHeight !== origHeight) {
+					// Div's dimensions changed, this means its font loaded, remove it from testContainer div
+					testDiv.parentNode.removeChild(testDiv);
+				}
+			}
+		}
+		
+		function finish() {
+			var testDiv;
+			window.clearInterval(interval);
+			testContainer.parentNode.removeChild(testContainer);
+			if (testContainer.childNodes.length !== 0) {
+				for (i = testContainer.childNodes.length - 1; i >= 0; i--) {
+					testDiv = testContainer.childNodes[i];
+					notLoadedFontFamilies.push(testDiv._ff);
+				}
+				callbackParameter = {
+					message: "Not all fonts are loaded",
+					notLoadedFontFamilies: notLoadedFontFamilies
+				};
+			} else {
+				callbackParameter = null;
+			}
+			fontsLoadedCallback(callbackParameter);
+		}
+		
+		if (options !== undefined) {
+			if (options.maxNumOfTries) {
+				maxNumOfTries = options.maxNumOfTries;
+			}
+			if (options.tryIntervalMs) {
+				tryIntervalMs = options.tryIntervalMs;
+			}
+		}
+		
+		// Use pretty big fonts "40px" so smallest difference between standard
+		// "serif" fonts and tested font-family will be noticable.
+		testContainer = document.createElement("div");
+		testContainer.style.cssText = "position:absolute; left:-10000px; top:-10000px; font-family: " + referenceFontFamily + "; font-size:40px;"; 
+		document.body.appendChild(testContainer);
+		
+		if (testDiv === null) {
+			testDiv = document.createElement("div");
+			testDiv.style.position = "absolute";
+			testDiv.style.whiteSpace = "nowrap";
+			testDiv.appendChild(document.createTextNode(" !\"\\#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿŒœŠšŸƒˆ˜ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϑϒϖ–—‘’‚“”„†‡•…‰′″‹›‾⁄€ℑ℘ℜ™ℵ←↑→↓↔↵⇐⇑⇒⇓⇔∀∂∃∅∇∈∉∋∏∑−∗√∝∞∠∧∨∩∪∫∴∼≅≈≠≡≤≥⊂⊃⊄⊆⊇⊕⊗⊥⋅⌈⌉⌊⌋〈〉◊♠♣♥♦"));
+			
+			// Get default dimensions
+			testContainer.appendChild(testDiv);
+			origWidth = testDiv.offsetWidth;
+			origHeight = testDiv.offsetHeight;
+			testDiv.parentNode.removeChild(testDiv);
+		}
+		
+		// Add div for each font-family
+		for (i = 0; i < fontFamiliesArray.length; i++) {
+			clonedDiv = testDiv.cloneNode(true);
+			testContainer.appendChild(clonedDiv);
+			// Apply tested font-family
+			clonedDiv.style.fontFamily = fontFamiliesArray[i] + ", " + referenceFontFamily;
+			clonedDiv._ff = fontFamiliesArray[i];
+		}
+		
+		// Check if dimension of all divs changed immediately after applying font-family
+		// maybe all fonts were already loaded so we don't need to poll and wait.
+		testDivDimensions();
+		
+		// Check that there is at least one div, means at least one not loaded font.
+		if (testContainer.childNodes.length) {
+			// Poll div for their dimensions every tryIntervalMs.
+			interval = window.setInterval(function() {
+				// Loop through all divs and check if their dimensions changed.
+				testDivDimensions();
+				// If no divs remained, then all fonts loaded.
+				// We also won't wait too much time, maybe some fonts are broken.
+				if (testContainer.childNodes.length === 0 || tryCount === maxNumOfTries) {
+					// All fonts are loaded OR (maxNumOfTries * tryIntervalMs) ms passed.
+					finish();
+				} else {
+					tryCount++;
+				}
+			}, tryIntervalMs);
+		} else {
+			// All fonts are loaded
+			testContainer.parentNode.removeChild(testContainer);
+			fontsLoadedCallback(null);
+		}
+	};
+
+}).apply(context);/*
  * File: window_manager.js
  * Author:	Li XianJing <xianjimli@hotmail.com>
  * Brief: window manager
@@ -8172,6 +8382,7 @@ WWindowManager.prototype.init = function(app, canvas) {
 	this.lastPointerPoint = {x:0, y:0};
 	this.enablePaint = true;
 	this.beforeDrawHandlers = [];
+	this.lastUpdateTime = Date.now();
 
 	return this;
 }
@@ -8194,14 +8405,6 @@ WWindowManager.prototype.onMultiTouch = function(action, points, event) {
 WWindowManager.prototype.preprocessEvent = function(type, e, arg) {
 	this.currentEvent = e.originalEvent ? e.originalEvent : e;
 	return true;
-}
-
-WWindowManager.prototype.getCanvas2D = function() {
-	var ctx = this.canvas.getContext("2d");
-	
-	ctx["imageSmoothingEnabled"] = true;
-
-	return ctx;
 }
 
 WWindowManager.prototype.getCanvas = function() {
@@ -8268,6 +8471,7 @@ WWindowManager.prototype.ungrab = function(win) {
 }
 
 WWindowManager.prototype.onDoubleClick = function(point) {	
+    this.translatePoint(point);
 	 this.target = this.findTargetWin(point);
 	 
 	if(this.target) {
@@ -8317,11 +8521,27 @@ WWindowManager.setInputScale = function(xInputScale, yInputScale) {
 	return;
 }
 
+WWindowManager.setInputOffset = function(xInputOffset, yInputOffset) {	
+	WWindowManager.xInputOffset = xInputOffset;
+	WWindowManager.yInputOffset = yInputOffset;
+
+	return;
+}
+
+
 WWindowManager.prototype.getInputScale = function() {	
 	return {x:WWindowManager.xInputScale, y:WWindowManager.yInputScale};
 }
 
 WWindowManager.prototype.translatePoint = function(point) {	
+	if(WWindowManager.xInputOffset) {
+		point.x -= WWindowManager.xInputOffset;
+	}
+	
+	if(WWindowManager.yInputOffset) {
+		point.y -= WWindowManager.yInputOffset;
+	}
+
 	if(WWindowManager.xInputScale) {
 		point.x = Math.round(point.x * WWindowManager.xInputScale);
 	}
@@ -8570,7 +8790,7 @@ WWindowManager.prototype.postRedraw = function(rect) {
 	
 	this.requestCount++;
 	if(this.requestCount < 2) {
-		requestAnimFrame(this.onDrawFrame.bind(this));
+		requestAnimationFrame(this.onDrawFrame.bind(this));
 	}
 
 	return;
@@ -8646,8 +8866,49 @@ WWindowManager.prototype.checkNeedRedraw = function(timeStep) {
 	return true;
 }
 
-WWindowManager.prototype.draw = function() {
-	var canvas = this.getCanvas2D();
+WWindowManager.canvasContextName = "2d";
+WWindowManager.setCanvasContextName = function(name) {
+	WWindowManager.canvasContextName = name;
+}
+
+WWindowManager.prototype.isWebGLRenderer = function() {
+	if(!this.ctx) {
+		this.getCanvas2D();
+	}
+
+	return !!this.ctx.isWebGL;
+}
+
+WWindowManager.prototype.getCanvas2D = function() {
+	if(!this.ctx) {
+		var ctx = this.canvas.getContext(WWindowManager.canvasContextName);
+
+		if(!ctx) {
+			ctx = this.canvas.getContext("2d");
+			ctx["imageSmoothingEnabled"] = true;
+		}
+
+		if(!ctx.beginFrame) {
+			ctx.beginFrame = function() {}
+		}
+		if(!ctx.endFrame) {
+			ctx.endFrame = function() {}
+		}
+		if(!ctx.clipRect) {
+			ctx.clipRect = function(x, y, w, h) {
+				ctx.beginPath();
+				ctx.rect(x, y, w, h);
+				ctx.clip();
+				ctx.beginPath();
+			}
+		}
+		this.ctx = ctx;
+	}
+
+	return this.ctx;
+}
+
+WWindowManager.prototype.doDraw = function(ctx) {
 	var now = Date.now();
 	var timeStep = now - (this.lastUpdateTime || 0);
 
@@ -8655,41 +8916,48 @@ WWindowManager.prototype.draw = function() {
 		return;
 	}
 
-	canvas.now = now;
-	canvas.animating = 0;
-	canvas.needRedraw = 0;
-	canvas.timeStep = timeStep;
-	canvas.lastUpdateTime = this.lastUpdateTime;
-	WWindowManager.dispatchTimers(canvas.now);
+	ctx.now = now;
+	ctx.animating = 0;
+	ctx.needRedraw = 0;
+	ctx.timeStep = timeStep;
+	ctx.lastUpdateTime = this.lastUpdateTime;
+	WWindowManager.dispatchTimers(ctx.now);
 
-	canvas.save();
-	this.drawWindows(canvas);
-	canvas.restore();
+	ctx.save();
+	this.drawWindows(ctx);
+	ctx.restore();
 
 	if(this.shouldShowFPS) {
 		var str = this.getFrameRate();
 		var w = 100;
 		var h = 30;
-		canvas.beginPath();
-		canvas.rect(0, 0, w, h);
-		canvas.fillStyle = "Black";
-		canvas.fill();
+		ctx.beginPath();
+		ctx.rect(0, 0, w, h);
+		ctx.fillStyle = "Black";
+		ctx.fill();
 		
-		canvas.save();
-		canvas.textAlign = "center";
-		canvas.textBaseline = "middle";
-		canvas.font = "20px Sans";
-		canvas.fillStyle = "White";
-		canvas.fillText(str, w >> 1, h >> 1);
-		canvas.restore();
+		ctx.save();
+		ctx.textAlign = "center";
+		ctx.textBaseline = "middle";
+		ctx.font = "20px Sans";
+		ctx.fillStyle = "White";
+		ctx.fillText(str, w >> 1, h >> 1);
+		ctx.restore();
 	}
 
-	if(window.cantkRTV8 || this.maxFpsMode || canvas.needRedraw > 0) {
+	if(window.cantkRTV8 || this.maxFpsMode || ctx.needRedraw > 0) {
 		this.postRedraw();
 	}
 
-	this.canvas.flush();
-	this.lastUpdateTime = canvas.now;
+	this.lastUpdateTime = ctx.now;
+}
+
+WWindowManager.prototype.draw = function() {
+	var ctx = this.getCanvas2D();
+
+	ctx.beginFrame();
+	this.doDraw(ctx);
+	ctx.endFrame();
 
 	return;
 }
@@ -9135,10 +9403,25 @@ WEventsManager.prototype.onTouchMoveGlobal = function(event) {
 WEventsManager.prototype.onTouchEndGlobal = function(event) {
 	var e = window.event || event ;
 	var points = this.getTouchPoints(e);
-	
+
 	if(!points.length) {
-		this.onPointerUp(this.getAbsPoint(null), e);
+        var last = this.lastPointerTime;
+        var cur = new Date();
+        this.lastPointerTime = cur; 
+        var dbClick = false;
+        if(last) {
+            var diff = cur - last;
+            if(diff < 200) {
+                dbClick = true;
+                this.lastPointerTime = 0;
+            }
+        }
+		if(dbClick) {
+            this.onDoubleClick(this.getAbsPoint(null), e);
+        }
+        this.onPointerUp(this.getAbsPoint(null), e);
 	}
+
 	this.onMultiTouch("touchend", points, e);
 
 	return this.cancelDefaultAction(e);
@@ -9420,7 +9703,9 @@ EditorElement.prototype.hide = function() {
 	this.element.blur();
 	this.element.onchange = null;
 	EditorElement.imeOpen = false;
-	setElementPosition(EditorElement.getMainCanvas(), 0, 0);
+	if(isMobile()) {
+		CantkRT.moveMainCanvas(0, 0);
+	}
 
 	if(this.onHide) {
 		this.onHide();
@@ -9672,6 +9957,7 @@ EditorElement.createSingleLineEdit = function() {
 EditorElement.createMultiLineEdit = function() {
 	var id = "multilineedit";
 	var element = document.createElement("textarea");
+    element.style.resize = "none";
 	document.body.appendChild(element);
 
 	return EditorElement.create(element, id);
@@ -10154,9 +10440,305 @@ PathAnimation.prototype.forEach = function(visit) {
 	return this;
 };
 
+//! stable.js 0.1.5, https://github.com/Two-Screen/stable
+//! © 2014 Angry Bytes and contributors. MIT licensed.
+
+(function() {
+
+// A stable array sort, because `Array#sort()` is not guaranteed stable.
+// This is an implementation of merge sort, without recursion.
+
+var stable = function(arr, comp) {
+    return exec(arr.slice(), comp);
+};
+
+stable.inplace = function(arr, comp) {
+    var result = exec(arr, comp);
+
+    // This simply copies back if the result isn't in the original array,
+    // which happens on an odd number of passes.
+    if (result !== arr) {
+        pass(result, null, arr.length, arr);
+    }
+
+    return arr;
+};
+
+// Execute the sort using the input array and a second buffer as work space.
+// Returns one of those two, containing the final result.
+function exec(arr, comp) {
+    if (typeof(comp) !== 'function') {
+        comp = function(a, b) {
+            return String(a).localeCompare(b);
+        };
+    }
+
+    // Short-circuit when there's nothing to sort.
+    var len = arr.length;
+    if (len <= 1) {
+        return arr;
+    }
+
+    // Rather than dividing input, simply iterate chunks of 1, 2, 4, 8, etc.
+    // Chunks are the size of the left or right hand in merge sort.
+    // Stop when the left-hand covers all of the array.
+    var buffer = new Array(len);
+    for (var chk = 1; chk < len; chk *= 2) {
+        pass(arr, comp, chk, buffer);
+
+        var tmp = arr;
+        arr = buffer;
+        buffer = tmp;
+    }
+
+    return arr;
+}
+
+// Run a single pass with the given chunk size.
+var pass = function(arr, comp, chk, result) {
+    var len = arr.length;
+    var i = 0;
+    // Step size / double chunk size.
+    var dbl = chk * 2;
+    // Bounds of the left and right chunks.
+    var l, r, e;
+    // Iterators over the left and right chunk.
+    var li, ri;
+
+    // Iterate over pairs of chunks.
+    for (l = 0; l < len; l += dbl) {
+        r = l + chk;
+        e = r + chk;
+        if (r > len) r = len;
+        if (e > len) e = len;
+
+        // Iterate both chunks in parallel.
+        li = l;
+        ri = r;
+        while (true) {
+            // Compare the chunks.
+            if (li < r && ri < e) {
+                // This works for a regular `sort()` compatible comparator,
+                // but also for a simple comparator like: `a > b`
+                if (comp(arr[li], arr[ri]) <= 0) {
+                    result[i++] = arr[li++];
+                }
+                else {
+                    result[i++] = arr[ri++];
+                }
+            }
+            // Nothing to compare, just flush what's left.
+            else if (li < r) {
+                result[i++] = arr[li++];
+            }
+            else if (ri < e) {
+                result[i++] = arr[ri++];
+            }
+            // Both iterators are at the chunk ends.
+            else {
+                break;
+            }
+        }
+    }
+};
+
+Object.defineProperty(Array.prototype, 'stableSort', 
+{
+	enumerable: false,
+	value: function(comp) {
+		var newArr = stable(this, comp);
+
+		for(var i = 0; i < newArr.length; i++) {
+			this[i] = newArr[i];
+		}
+
+		return this;
+	}
+});
+
+})();
+/*
+ * File: assets_downloader.js
+ * Author:  Li XianJing <xianjimli@hotmail.com>
+ * Brief: assets downloader for Runtime.
+ * 
+ * Copyright (c) 2015 - 2016  Holaverse Inc.
+ * 
+ */
+function AssetsDownloader() {
+}
+
+AssetsDownloader.requests = {};
+AssetsDownloader.createFontsRequest = function() {
+	return AssetsDownloader.createRequest("__fonts__");
+}
+
+AssetsDownloader.createAudiosRequest = function() {
+	return AssetsDownloader.createRequest("__audios__");
+}
+
+AssetsDownloader.createRequest = function(name) {
+	var req = AssetsDownloader.requests[name];
+
+	if(!req) {
+		req = new AssetsDownloader.Request(name);
+		AssetsDownloader.requests[name] = req;
+	}
+
+	return req;
+}
+
+AssetsDownloader.isDownloaded = function(name) {
+	var req = AssetsDownloader.requests[name];
+
+	return req && req.loaded;
+}
+
+AssetsDownloader.isAvailable = function() {
+	return (!!window.downloadAssets) || AssetsDownloader.simulateDownload;
+}
+
+AssetsDownloader.simulateDownload = false;
+AssetsDownloader.download = function(req) {
+	if(window.downloadAssets && !req.loaded) {
+		window.downloadAssets(req.name, req.onEvent.bind(req));
+	}
+	else if(AssetsDownloader.simulateDownload) {
+		function stepIt() {
+			req.percent += 20;
+			req.onEvent({type:"progress", value:req.percent});
+			if(req.percent < 100) {
+				setTimeout(stepIt.bind(req), 500);
+			}
+		}
+
+		req.percent = 0;
+		setTimeout(stepIt.bind(req), 1000);
+	}else{
+		req.onEvent({type:"progress", value:100});
+	}
+
+	return req;
+}
+
+AssetsDownloader.downloadMulti = function(names, onProgress, onDone) {
+	var queue = [];
+	var totalSize = 0;
+	var finishSize = 0;
+
+	function downloadNext() {
+		if(queue.length < 1) {
+			if(onDone) {
+				onDone();	
+			}
+		}else{
+			var req = queue.pop();
+			req.on("progress", onOneProgress);
+			AssetsDownloader.download(req);
+			console.log("Download : " + req.name)
+		}
+	}
+
+	function onOneProgress(event) {
+		var reqFinishSize = finishSize + this.size * (event.value/100);
+
+		var percent = 100 * reqFinishSize/totalSize;
+		if(onProgress) {
+			onProgress(percent, reqFinishSize, totalSize);
+		}
+		
+		console.log("percent=" + percent);
+		if(event.value >= 100) {
+			console.log("Download done: " + this.name)
+			this.off("progress", onOneProgress);
+			finishSize += this.size;
+			downloadNext();
+		}
+	}
+	
+	for(var i = 0; i < names.length; i++) {
+		var r = AssetsDownloader.createRequest(names[i]);
+		queue.push(r);
+		totalSize += r.size;
+	}
+
+	downloadNext();
+
+	return;
+}
+
+AssetsDownloader.Request = function(name) {
+	this.name = name;
+	if(window.getAssetsSize) {
+		this.size = window.getAssetsSize(name);
+	}else{
+		this.size = 1024;
+	}
+	
+	if(window.getAssetsDownloadedSize) {
+		this.donwloadedSize = window.getAssetsDownloadedSize(name);
+	}else{
+		this.donwloadedSize = 0;
+	}
+
+	this.loaded = this.donwloadedSize >= this.size;
+
+	return this;
+}
+
+AssetsDownloader.Request.prototype.onEvent = function(event) {
+	if(event.type === "progress" && event.value >= 100) {
+		this.loaded = true;	
+	}
+
+	if(event.type === "error") {
+		this.error = event.value;
+	}
+
+	var me = this;
+	setTimeout(function() {
+		me.dispatchEvent(event);
+	}, 0);
+}
+
+TEventTarget.apply(AssetsDownloader.Request.prototype); 
+
+/**
+ * @method downloadAssets
+ *
+ * 加载指定场景的资源。
+ *
+ * @param {String} sceneName 要加载的场景的名称。
+ * @param {Function} onEvent 回调函数。原型为onEvent(event)。
+ *
+ * event的成员有：
+ *
+ * type: "progress"表示进度, "error"表示错误。
+ * value: type为"progress"时，value表示进度的百分比，取值0-100。type为"error"时，value表示具体的错误信息。
+ */
+//function downloadAssets(sceneName, onEvent) 
+
+/**
+ * @method getAssetsSize
+ *
+ * 获取指定场景的资源大小(字节)。
+ * @return {Number} 资源的大小。
+ * 
+ */
+//function getAssetsSize(sceneName)
+
+/**
+ * @method getAssetsDownloadedSize
+ *
+ * 获取指定场景的资源已经下载的大小(字节)。
+ * @return {Number} 获取指定场景的资源已经下载的大小。
+ * 
+ */
+//function getAssetsDownloadedSize(sceneName)
+
 window.CanTK = {};
 
-var gCantkBuildDate = "2016年 04月 16日 星期六 17:04:35 CST";console.log("cantk build date: " + gCantkBuildDate);
+var gCantkBuildDate = "2016年 07月 13日 星期三 15:25:33 CST";console.log("cantk build date: " + gCantkBuildDate);
 if(!window.CanTK) {
 	window.CanTK = {};
 }
@@ -11137,7 +11719,7 @@ Shape.prototype.defaultDrawText = function(canvas) {
 
 	var lines = text.split(/\n/);
 	if(lines.length < 2) {
-		if(canvas.measureText(text).width < 1.2 * width) {
+		if(this.singleLineMode || canvas.measureText(text).width < 1.2 * width) {
 			this.draw1LText(canvas);
 		}
 		else {
@@ -11158,6 +11740,15 @@ Shape.prototype.draw1LText = function(canvas, drawAll) {
 	if(!text || this.editing) {
 		return;
 	}
+
+    if(!this.lines){
+        this.layoutText(canvas);
+    }
+	
+    if(!this.lines) {
+		return;
+	}
+    text = this.lines[0];
 
 	var x = 0;
 	var y = 0;
@@ -11239,7 +11830,9 @@ Shape.prototype.draw1LText = function(canvas, drawAll) {
 }
 
 Shape.prototype.drawMLText = function(canvas, drawAll) {
-	this.layoutText(canvas);
+	if(!this.lines){
+        this.layoutText(canvas);
+    }
 
 	if(!this.lines) {
 		return;
@@ -11975,7 +12568,7 @@ RShape.prototype.resize = function(w, h) {
 }
 
 RShape.prototype.translate = function(canvas) {
-	canvas.translate(this.getLeft(), this.getTop());
+	canvas.translate(this._left, this._top);
 
 	return;
 }
@@ -12634,6 +13227,10 @@ RShape.prototype.doFromJson = function(js) {
 	if(js.y !== undefined) {
 		this.top = js.y;
 	}
+
+    if(js.docURL !== undefined && js.docURL.length > 0) {
+        this.docURL = js.docURL;
+    }
 
 	this.setText(js.text);
 	this.setEnable(js.enable);
@@ -13312,6 +13909,16 @@ TView.prototype.translatePointToWm = function(point) {
 	return p;
 }
 
+TView.prototype.translatePointToView = function(point) {
+    var p = {x:point.x, y:point.y};
+    
+    var wm = this.getWindowManager();
+    p.x += wm.getX();
+    p.y += wm.getY();
+
+    return p;
+}
+
 TView.prototype.onDoubleClick = function(point) {
 	this.updateLastPointerPoint(point, true);
 
@@ -13589,10 +14196,6 @@ TDocument.prototype.loadV2 = function(json) {
     if(meta && meta.general) {
         document.title = meta.general.appname;
     }
-	if(meta && meta.extfonts) {
-		ResLoader.loadFonts(meta.extfonts);
-	}
-
 
     var keys = ["soundMusicAutoPlay", "soundMusicLoop", "soundMusicVolume",
         "soundMusicURLs", "soundEffectsEnalbe", "soundEffectVolume", "soundEffectURLs"];
@@ -13734,6 +14337,7 @@ TRuntimeView.prototype.init = function(parent, x, y, w, h, app) {
 
 	this.doc.onLoad = this.onLoad.bind(this);
 	WWindowManager.onMultiTouch = this.onMultiTouch.bind(this);
+	WWindowManager.instance.drawWindows = this.paintSelf.bind(this);
 
 	return this;
 }
@@ -13807,8 +14411,23 @@ TRuntimeView.prototype.resizeForAuto = function(wm) {
 }
 
 TRuntimeView.prototype.adjustWMSizePositionPreview = function(wm) {
+	var vp = cantkGetViewPort();
+	var w = wm.w;
+	var h = wm.h;
+	var scale = Math.min(1, Math.min(vp.width/w, vp.height/h));
+	var styleW = w * scale;
+	var styleH = h * scale;
+
+	var x = (vp.width - styleW) >> 1;
+	var y = (vp.height - styleH) >> 1;
+
 	wm.setLeftTop(0, 0);
-	this.resizeForFixResolution(wm);
+	this.app.resizeWin(w, h);
+	this.app.resizeCanvas(w, h, x, y, styleW, styleH);
+	WWindowManager.setInputOffset(x, y);
+	WWindowManager.setInputScale(1/scale, 1/scale);
+
+	wm.relayout();
 }
 
 TRuntimeView.prototype.adjustWMSizePositionRun = function(wm) {
@@ -13865,7 +14484,12 @@ TRuntimeView.prototype.adjustWMSizePosition = function() {
 
 TRuntimeView.prototype.onLoad = function() {
 	var wm = this.getWindowManager();
-	
+	var meta = this.getMeta();
+
+	if(meta.general.useWebGL) {
+		WWindowManager.setCanvasContextName("2d-webgl");
+	}
+
 	//for preview current window
 	if(window.cantkInitWindow !== undefined) {
 		wm.setInitWindow(window.cantkInitWindow);
@@ -13971,7 +14595,8 @@ TRuntimeView.prototype.loadUserScripts = function(meta) {
             var extLibs = [];
             scripts.forEach(function(script) {
                 if(script.indexOf("read.php?") > 0 && script.indexOf("/libs/") > 0) {
-                    userLibs.push(script);
+                    var t = meta.docSavedTime ? meta.docSavedTime : Date.now();
+                    userLibs.push(script + "&timestamp=" + t);
                 } else {
                     extLibs.push(script);
                 }
@@ -14026,9 +14651,6 @@ TRuntimeView.prototype.run = function() {
 
 	this.modifyTitle(meta);
 	this.loadUserScripts(meta);
-	if(meta && meta.extfonts) {
-		ResLoader.loadFonts(meta.extfonts);
-	}
 	this.startRedrawTimer(meta.general.fps);
 
 	wm.systemInit();
@@ -14236,11 +14858,7 @@ TWebApp.prototype.prepareCanvas = function() {
 	var vp = cantkGetViewPort();
 	var w = vp.width;
 	var h = vp.height;
-
-	canvas.width = w;
-	canvas.height = h;
-	canvas.style.width = w + "px";
-	canvas.style.height = h + "px";
+	CantkRT.resizeMainCanvas(w, h, w, w);
 
 	this.manager = WWindowManager.create(this, this.canvas, this.canvas);
 
@@ -14280,13 +14898,8 @@ TWebApp.prototype.resizeWin = function(w, h) {
 TWebApp.prototype.resizeCanvas = function(w, h, x, y, styleW, styleH) {
 	var canvas = this.canvas;
 
-	canvas.style.position = "absolute";
-	canvas.width = w;
-	canvas.height = h;
-	canvas.style.top = y + "px";
-	canvas.style.left = x + "px";
-	canvas.style.width = styleW + "px";
-	canvas.style.height = styleH + "px";
+	CantkRT.moveMainCanvas(x, y);
+	CantkRT.resizeMainCanvas(w, h, styleW, styleH);
 
 	return;
 }
@@ -14309,6 +14922,7 @@ TWebApp.prototype.onSizeChanged = function() {
 	this.viewPort = viewPort;
 	this.manager.resize(w, h);
 	this.view.adjustWMSizePosition();
+	UIElement.getMainCanvasScale(true);
 }
 
 TWebApp.prototype.exitApp = function() {
@@ -14807,14 +15421,14 @@ function AnimationFactory() {
 		switch(name) {
 			case "anim-forward": {
 				var interpolator =  new DecelerateInterpolator();
-				animation = isAndroid() ? new AnimationHTranslate(true) : new AnimationHTranslate(true);
+				animation = new AnimationHTranslate(true);
 				animation.toLeft();
 				animation.init(duration, interpolator);
 				break;
 			}
 			case "anim-backward": {
 				var interpolator =  new DecelerateInterpolator();
-				animation = isAndroid() ? new AnimationHTranslate(false) : new AnimationHTranslate(false);
+				animation = new AnimationHTranslate(false);
 				animation.toRight();
 				animation.init(duration, interpolator);
 				break;
@@ -14832,35 +15446,23 @@ function AnimationFactory() {
 				break;
 			}
 			case "anim-scale-show-win": {
-				var interpolator =  new DecelerateInterpolator(1);
-				if(isMobile()) {
-					animation = new AnimationBrowserScaleWin(true);
-					animation.setRange(1.2, 1.0);
-				}
-				else {
-					animation = new AnimationScale(true);
-					animation.setRange(0.9, 1.0);
-				}
+				var interpolator =  new DecelerateInterpolator();
+				animation = new AnimationScale(true);
+				animation.setRange(0.9, 1.0);
 				animation.init(duration, interpolator);
 				break;
 			}
 			case "anim-scale-hide-win": {
 				var interpolator =  new AccelerateInterpolator();
-				if(isMobile()) {
-					animation = new AnimationBrowserScaleWin(false);
-					animation.setRange(0.9, 1.0);
-				}
-				else {
-					animation = new AnimationScale(false);
-					animation.setRange(1.0, 0.9);
-				}
+				animation = new AnimationScale(false);
+				animation.setRange(1.0, 0.9);
 				animation.init(duration, interpolator);
 				break;
 			}
 			case "anim-scale-show-dialog": {
 				duration = duration ? duration : 300;
 				var interpolator =  new DecelerateInterpolator();
-				animation = isAndroid() ? new AnimationBrowserScaleDialog(true) : new AnimationScale(true);
+				animation = new AnimationScale(true);
 				animation.setRange(0.9, 1.0);
 				animation.init(duration, interpolator);
 				break;
@@ -14868,90 +15470,37 @@ function AnimationFactory() {
 			case "anim-scale-hide-dialog": {
 				duration = duration ? duration : 300;
 				var interpolator =  new AccelerateInterpolator();
-				animation = isAndroid() ? new AnimationBrowserScaleDialog(false) : new AnimationScale(false);
+				animation = new AnimationScale(false);
 				animation.setRange(1.0, 0.9);
 				animation.init(duration, interpolator);
 				break;
 			}
 			case "anim-fade-in": {
 				var interpolator =  new AccelerateInterpolator();
-				animation = isAndroid() ? new AnimationBrowserAlpha(true) : new AnimationAlpha(true);
-				animation.setRange(0.6, 1.0);
-				animation.init(500, interpolator);
+				animation = new AnimationAlpha(true);
+				animation.setRange(0.1, 1.0);
+				animation.init(800, interpolator);
 				break;
 			}
 			case "anim-fade-out": {
 				var interpolator =  new AccelerateInterpolator();
-				animation = isAndroid() ? new AnimationBrowserAlpha(false) : new AnimationAlpha(false);
-				animation.setRange(1.0, 0.8);
+				animation = new AnimationAlpha(false);
+				animation.setRange(1.0, 0.1);
 				animation.init(300, interpolator);
 				break;
 			}
 			case "anim-move-up": {
 				var interpolator =  new DecelerateInterpolator();
-				animation = isMobile() ? new AnimationBrowserMove(true) : new AnimationMove(true);
+				animation = new AnimationMove(true);
 				animation.init(duration, interpolator);
 				break;
 			}
 			case "anim-move-down": {
 				var interpolator =  new AccelerateInterpolator();
-				animation = isMobile() ? new AnimationBrowserMove(false) : new AnimationMove(false);
+				animation = new AnimationMove(false);
 				animation.init(duration, interpolator);
 				break;
 			}
-			case "anim-expand-up": 
-			case "anim-expand-left": 
-			case "anim-expand-right": 
-			case "anim-expand-down": {
-				var interpolator =  new DecelerateInterpolator(); 
-				animation = new Animation1Expand(true);
-				animation.init(400, interpolator);
-				break;
-			}
-			case "anim-collapse-up": 
-			case "anim-collapse-left": 
-			case "anim-collapse-right": 
-			case "anim-collapse-down": {
-				var interpolator =  new AccelerateInterpolator(); 
-				animation = new Animation1Expand(true);
-				animation.init(400, interpolator);
-				break;
-			}
-			case "anim-scale1-show-origin-topleft":
-			case "anim-scale1-show-origin-center":
-			case "anim-scale1-show-origin-bottomleft":
-			case "anim-scale1-show-origin-topright":
-			case "anim-scale1-show-origin-bottomright":
-			case "anim-scale1-show": {
-				var interpolator =  new DecelerateInterpolator(); 
-				animation = new Animation1Scale(true);
-				animation.init(400, interpolator);
-				break;
-			}
-			case "anim-scale1-hide-origin-topleft":
-			case "anim-scale1-hide-origin-center":
-			case "anim-scale1-hide-origin-bottomleft":
-			case "anim-scale1-hide-origin-topright":
-			case "anim-scale1-hide-origin-bottomright":
-			case "anim-scale1-hide": {
-				var interpolator =  new AccelerateInterpolator(); 
-				animation = new Animation1Scale(false);
-				animation.init(400, interpolator);
-				break;
-			}
-			case "anim-alpha1-show": {
-				var interpolator =  new DecelerateInterpolator(); 
-				animation = new Animation1Alpha(true);
-				animation.init(400, interpolator);
-				break;
-			}
-			case "anim-alpha1-hide": {
-				var interpolator =  new AccelerateInterpolator(); 
-				animation = new Animation1Alpha(false);
-				animation.init(400, interpolator);
-				break;
-			}
-			
 		}
 		
 		return animation;
@@ -15005,68 +15554,8 @@ AnimationFactory.create = function(name, duration) {
 }
 
 Animation.getCanvas = function() {
-	if(!Animation.canvas) {
-		Animation.canvas = document.createElement("canvas");
-		Animation.canvas.type = "animation_canvas";
-	}
-	
-	Animation.canvas.style.zIndex = 9;
-	Animation.canvas.style["opacity"] = 1;
-	scaleElement(Animation.canvas, 1, 1);
-	
-	return Animation.canvas;
+    return UIElement.getMainCanvas();
 }
-
-Animation.getOldWinCanvas = function() {
-	if(!Animation.oldWnCanvas) {
-		Animation.oldWnCanvas= document.createElement("canvas");
-		Animation.oldWnCanvas.type = "animation_canvas";
-	}
-	
-	Animation.oldWnCanvas.style.zIndex = 9;
-	Animation.oldWnCanvas.style["opacity"] = 1;
-	scaleElement(Animation.oldWnCanvas, 1, 1);
-	
-	return Animation.oldWnCanvas;
-}
-
-Animation.getNewWinCanvas = function() {
-	if(!Animation.newWinCanvas) {
-		Animation.newWinCanvas= document.createElement("canvas");
-		Animation.newWinCanvas.type = "animation_canvas";
-	}
-
-	Animation.newWinCanvas.style.zIndex = 9;
-	Animation.newWinCanvas.style["opacity"] = 1;
-	scaleElement(Animation.newWinCanvas, 1, 1);
-	
-	return Animation.newWinCanvas;
-}
-
-Animation.getBackendCanvas = function(width, height) {
-	if(!Animation.backendCanvas) {
-		Animation.backendCanvas = document.createElement("canvas");
-
-		Animation.backendCanvas.type = "backend_canvas";
-		Animation.backendCanvas.width = width;
-		Animation.backendCanvas.height = height;
-	}
-
-	if(Animation.backendCanvas) {
-		if(Animation.backendCanvas.width != width) {
-			Animation.backendCanvas.width = width;
-		}
-
-		if(Animation.backendCanvas.height != height) {
-			Animation.backendCanvas.height = height;
-		}
-		Animation.scaleCanvas(Animation.backendCanvas, width, height);
-	}
-	scaleElement(Animation.backendCanvas, 1, 1);
-
-	return Animation.backendCanvas;
-}
-
 
 function Animation(showWin) {
 	this.scale = 1;
@@ -15079,6 +15568,12 @@ function Animation(showWin) {
 
 		return;
 	}
+
+    this.setWins = function(oldWin, newWin) {
+        this.oldWin = oldWin;
+        this.newWin = newWin;
+        this.wm = oldWin.getWindowManager();
+    }
 
 	this.setRectOfFront = function(x, y, w, h) {
 		this.frontX = x;
@@ -15095,35 +15590,18 @@ function Animation(showWin) {
 		return;
 	}
 
-	this.prepare = function(x, y, w, h, canvasImage, onFinish) {
+	this.prepare = function(x, y, w, h, onFinish) {
 		this.x = Math.round(x);
 		this.y = Math.round(y);
 		this.w = Math.round(w);
 		this.h = Math.round(h);
 		this.onFinish = onFinish;
-		this.canvasImage = CantkRT.createImageFromCanvas(canvasImage);
 
 		this.setRectOfFront(0, 0, w, h);
-		if(canvasImage) {
-			this.sw = canvasImage.width;
-			this.sh = canvasImage.height;
-		}
 
 		this.show();
 
 		return true;
-	}
-
-	this.moveResizeCanvas = function(canvasElement, x, y, w, h) {
-		canvasElement.style.position = "absolute";
-		canvasElement.width = w;
-		canvasElement.height = h;
-		setElementPosition(canvasElement, x, y);
-		canvasElement.style.visibility = 'visible';
-
-		Animation.scaleCanvas(canvasElement, w, h);
-
-		return;
 	}
 
 	this.show = function() {
@@ -15133,16 +15611,12 @@ function Animation(showWin) {
 		this.visible = true;
 		this.canvasElement = Animation.getCanvas();
 
-		this.moveResizeCanvas(this.canvasElement, this.x, this.y, w, h);
-		document.body.appendChild(this.canvasElement);
-		
 		return true;
 	}
 
 	this.hide = function() {
 		this.visible = false;
 		if(this.canvasElement && this.canvasElement.parentNode) {
-			document.body.removeChild(this.canvasElement);
 			this.canvasElement = null;
 		}
 
@@ -15176,18 +15650,6 @@ function Animation(showWin) {
 	}
 
 	this.drawBackground = function(canvas) {
-		if(this.isFirstStep) {
-			this.canvas.drawImage(this.canvasImage, 0, 0, this.w, this.h, 0, 0, this.w, this.h);
-		}
-		else {
-			var x = this.frontX;
-			var y = this.frontY;
-			var w = this.frontW;
-			var h = this.frontH;
-
-			this.canvas.drawImage(this.canvasImage, x, y, w, h, x, y, w, h);
-		}
-
 		return;
 	}
 
@@ -15207,8 +15669,8 @@ function Animation(showWin) {
 		animation.isFirstStep = true;
 
 		this.beforeRun();
-		WWindowManager.getInstance().setPaintEnable(false);
-
+		WWindowManager.getInstance().setPaintEnable(false); 
+		this.wm.setEnable(false); 
 		function animStep() {
 			var percent = 0;
 			var timePercent = animation.getTimePercent();
@@ -15217,7 +15679,7 @@ function Animation(showWin) {
 				percent = animation.getPercent(timePercent);
 				animation.doStep(percent);
 
-				requestAnimFrame(animStep);
+				requestAnimationFrame(animStep);
 			}
 			else {
 				animation.cleanup();
@@ -15239,14 +15701,11 @@ function Animation(showWin) {
 
 		setTimeout(function() {
 			animation.hide();
+		    animation.wm.setEnable(true); 
 		}, 100);
 
 		if(onFinish) {
 			onFinish();
-		}
-
-		if(this.canvasImage && this.canvasImage.unload) {
-			this.canvasImage.unload();
 		}
 	}
 
@@ -15264,15 +15723,6 @@ function setElementPosition(element, x, y) {
 	element.style.left = Math.round(x) + "px";
 	element.style.top = Math.round(y) + "px";
 	element.style["opacity"] = 1.0;
-
-	return;
-}
-
-Animation.scaleCanvas = function(canvas, width, height) {
-	var scale = UIElement.getMainCanvasScale();
-
-	canvas.style.width = Math.round(width/scale.x) + "px";
-	canvas.style.height = Math.round(height/scale.y) + "px";
 
 	return;
 }
@@ -15326,69 +15776,6 @@ function rotateElement(element, deg) {
 	return;
 }
 
-function AnimationHTranslateAndroid() {
-	Animation.apply(this, arguments);
-	
-	this.leftToRight = true;
-
-	this.show = function() {
-		document.body.appendChild(Animation.backendCanvas);
-		Animation.backendCanvas.style.zIndex = 9;
-		this.canvasElement = Animation.backendCanvas;
-		setElementPosition(Animation.backendCanvas, this.x, this.y);
-
-		return true;
-	}
-
-	this.hide = function() {
-		if(this.canvasElement) {
-			document.body.removeChild(this.canvasElement);
-			this.canvasElement = null;
-		}
-		return true;
-	}
-
-	this.doStep = function(percent) {
-		this.step(percent);
-		return;
-	}
-
-	this.beforeRun = function() {
-		var range = this.sw - this.w;
-		
-		this.range = range * 0.7;
-		this.start = range - this.range;
-
-		return;
-	}
-	
-	this.toLeft = function() {
-		this.leftToRight = true;
-
-		return;
-	}
-	
-	this.toRight = function() {
-		this.leftToRight = false;
-
-		return;
-	}
-
-	this.step = function(percent) {
-		var ox = 0;
-		if(this.leftToRight) {
-			ox = this.start + this.range * percent;
-		}
-		else {
-			ox = this.w - this.range * percent - this.start;
-		}
-
-		moveElement(Animation.backendCanvas, -ox+this.x, this.y);
-
-		return true;
-	}
-}
-
 function AnimationVTranslate(showWin) {
 	Animation.apply(this, arguments);
 
@@ -15400,21 +15787,45 @@ function AnimationVTranslate(showWin) {
 	}
 
 	this.step = function(percent) {
-		var x = this.frontX;
+ 		var x = this.frontX;
 		var y = this.frontY;
 		var w = this.frontW;
 		var dy = this.range * percent;
 		var h = this.showWin ? dy : (this.range - dy);		
 		var oy = this.showWin ? (this.frontY + this.range - dy) : (this.frontY + dy);
 
-		if(oy > 0) {
-			this.canvas.drawImage(this.canvasImage, 0, this.h - oy, w, oy, 0, 0, w, oy);
-		}
+        var canvas = this.canvas;
+        canvas.save();
+        var wm = this.oldWin.getWindowManager();
+        canvas.translate(wm.x, wm.y);
+ 
+        if(this.showWin) {
+            canvas.translate(0, oy - this.h);
+            canvas.save();
+        	canvas.clipRect(0, 0, this.w, this.h);
+            this.oldWin.paintSelf(canvas);
+            canvas.restore();
 
-		if(h > 0) {
-			this.canvas.drawImage(this.canvasImage, x+this.w, y, w, h, x, oy, w, h);
-		}
-
+            canvas.translate(0, this.h);
+            canvas.save();
+        	canvas.clipRect(0, 0, this.w, this.h);
+            this.newWin.paintSelf(canvas);
+            canvas.restore();
+        } else {
+            canvas.translate(0, oy - this.h);
+            canvas.save();
+        	canvas.clipRect(0, 0, this.w, this.h);
+            this.newWin.paintSelf(canvas);
+            canvas.restore();
+            
+            canvas.translate(0, this.h);
+            canvas.save();
+        	canvas.clipRect(0, 0, this.w, this.h);
+            this.oldWin.paintSelf(canvas);
+            canvas.restore();
+        }
+        canvas.restore();
+    
 		return true;
 	}
 }
@@ -15425,14 +15836,9 @@ function AnimationHTranslate() {
 	this.leftToRight = true;
 
 	this.beforeRun = function() {
-		var range = this.sw - this.w;
-		
-		if(isMobile()) {
-			this.range = range * 0.8;
-		}
-		else {
-			this.range = range;
-		}
+		var range = this.newWin.w;
+	
+		this.range = range;
 
 		this.start = range - this.range;
 		this.canvas = this.canvasElement.getContext("2d");
@@ -15452,7 +15858,7 @@ function AnimationHTranslate() {
 
 	this.step = function(percent) {
 		var ox = 0;
-		if(this.leftToRight) {
+        if(this.leftToRight) {
 			ox = this.start + this.range * percent;
 		}
 		else {
@@ -15462,10 +15868,38 @@ function AnimationHTranslate() {
 		if(this.lastOffset === ox) {
 			return true;
 		}
+        var canvas = this.canvas;
+        canvas.save();
+        var wm = this.oldWin.getWindowManager();
+        canvas.translate(wm.x, wm.y);
 
-		this.canvas.drawImage(this.canvasImage, ox, 0, this.w, this.h, 0, 0, this.w, this.h);
+        if(this.leftToRight) {
+            canvas.translate(-ox, 0); 
+            canvas.save();
+        	canvas.clipRect(0, 0, this.w, this.h);
+            this.oldWin.paintSelf(canvas);
+			canvas.restore();
+
+            canvas.translate(this.w, 0); 
+            canvas.save();
+        	canvas.clipRect(0, 0, this.w, this.h);
+            this.newWin.paintSelf(canvas);
+			canvas.restore();
+        } else {
+            canvas.translate(-ox, 0); 
+            canvas.save();
+        	canvas.clipRect(0, 0, this.w, this.h);
+            this.newWin.paintSelf(canvas);
+			canvas.restore();
+
+            canvas.translate(this.w, 0); 
+            canvas.save();
+        	canvas.clipRect(0, 0, this.w, this.h);
+            this.oldWin.paintSelf(canvas);
+			canvas.restore();
+        }
+        canvas.restore();
 		this.lastOffset = ox;
-		//console.log("Step: " + percent + " ox=" + ox);
 		return true;
 	}
 }
@@ -15494,25 +15928,34 @@ function AnimationScale() {
 	this.step = function(percent) {
 		var scale = this.from + percent * (this.to - this.from);
 		var alpha = this.to > this.from ? percent : (1-percent);
-		if(this.canvasImage) {
-			var canvas = this.canvas;
-			var cx = this.frontX + 0.5 * this.frontW;
-			var cy = this.frontY + 0.5 * this.frontH;
+		var canvas = this.canvas;
+        var dx = (this.w >> 1);
+        var dy = (this.h >> 1);
+        
+        canvas.save();
+        var wm = this.oldWin.getWindowManager();
+        canvas.translate(wm.x, wm.y);
+        canvas.clipRect(0, 0, this.w, this.h);
+        
+        if(this.to > this.from) { 
+            this.oldWin.paintSelf(canvas);
 
-			this.drawBackground(canvas);
+            canvas.globalAlpha = alpha; 
+            canvas.translate(dx, dy);
+            canvas.scale(scale, scale);
+            canvas.translate(-dx, -dy);
+            this.newWin.paintSelf(canvas);
+        } else {
+            this.newWin.paintSelf(canvas);
 
-			canvas.save();
-			canvas.translate(cx, cy);
-			canvas.globalAlpha = alpha;
-			canvas.scale(scale, scale);
-			canvas.translate(-0.5 * this.frontW, -0.5 * this.frontH);
-
-			canvas.drawImage(this.canvasImage, this.frontX + this.w, this.frontY, this.frontW, this.frontH,
-				0, 0, this.frontW, this.frontH);
-			canvas.restore();
-		}
-
-		//console.log("Step: " + percent + " scale=" + scale);
+            canvas.globalAlpha = alpha; 
+            canvas.translate(dx, dy);
+            canvas.scale(scale, scale);
+            canvas.translate(-dx, -dy);
+            this.oldWin.paintSelf(canvas);
+        }
+        canvas.restore();
+		//console.log("Step: " + percent + " alpha=" + alpha + " scale=" + scale);
 		return true;
 	}
 }
@@ -15541,18 +15984,22 @@ function AnimationAlpha() {
 	this.step = function(percent) {
 		var alpha = this.from + percent * (this.to - this.from);
 
-		if(this.canvasImage) {
-			var canvas = this.canvas;
-			
-			canvas.drawImage(this.canvasImage, 0, 0, this.w, this.h, 0, 0, this.w, this.h);
-			canvas.save();
-			canvas.globalAlpha = alpha;
-			canvas.drawImage(this.canvasImage, this.frontX + this.w, this.frontY, this.frontW, this.frontH,
-				this.frontX, this.frontY, this.frontW, this.frontH);
-			canvas.restore();
-		}
-
-		//console.log("Step: " + percent + " alpha=" + alpha);
+		var canvas = this.canvas;
+		canvas.save();
+        var wm = this.oldWin.getWindowManager();
+        canvas.translate(wm.x, wm.y);
+        canvas.clipRect(0, 0, this.w, this.h);
+ 
+        if(this.to > this.from) {
+            this.oldWin.paintSelf(canvas);
+            canvas.globalAlpha = alpha;
+            this.newWin.paintSelf(canvas);
+        } else {
+            this.newWin.paintSelf(canvas);
+            canvas.globalAlpha = alpha;
+            this.oldWin.paintSelf(canvas);
+        }
+        canvas.restore();
 		return true;
 	}
 }
@@ -15568,748 +16015,32 @@ function AnimationMove(showWin) {
 	}
 
 	this.step = function(percent) {
-		this.drawBackground(this.canvas);
-
 		var x = this.frontX;
 		var y = this.frontY;
 		var w = this.frontW;
 		var dy = this.range * percent;
 		var h = this.showWin ? dy : (this.range - dy);		
 		var oy = this.showWin ? (this.frontY + this.range - dy) : (this.frontY + dy);
-		
-		if(h > 0) {
-			this.canvas.drawImage(this.canvasImage, x+this.w, y, w, h, x, oy, w, h);
-		}
+	
+        var canvas = this.canvas;
+        canvas.save();
+        var wm = this.oldWin.getWindowManager();
+        canvas.translate(wm.x, wm.y);
+        canvas.clipRect(0, 0, this.w, this.h);
+ 
+        if(showWin) {
+            this.oldWin.paintSelf(canvas);
+            canvas.translate(0, oy);
+            this.newWin.paintSelf(canvas);
+        } else {
+            this.newWin.paintSelf(canvas);
+            canvas.translate(0, oy);
+            this.oldWin.paintSelf(canvas);
+        }
+        canvas.restore();    
 
 		return true;
 	}
-}
-
-//////////////////////////////////////////////////////////////////
-
-function AnimationBrowser(showWin) {
-	Animation.apply(this, arguments);
-	
-	this.to = 1.0;
-	this.from = 0;
-	this.frontX = 0;
-	this.frontY = 0;
-	this.frontW = 0;
-	this.frontH = 0;
-
-	function removeCanvas(canvas) {
-		try {
-			document.body.removeChild(canvas);
-		}
-		catch(e) {
-			console.log(e.toString());
-		}
-
-		return;
-	}
-
-	this.setRange = function(from, to) {
-		this.to = to;
-		this.from = from;
-
-		return;
-	}
-
-	this.onShowCanvas = function() {
-		setElementPosition(this.oldWinCanvas, this.x, this.y);
-		setElementPosition(this.newWinCanvas, this.x, this.y);
-		showElement(this.oldWinCanvas);
-		showElement(this.newWinCanvas);
-
-		return;
-	}
-
-	this.showCanvas = function(oldWinZIndex, newWinZIndex) {
-		var w = this.w;
-		var h = this.h;
-		var oldWinCanvas = Animation.getOldWinCanvas();
-		var newWinCanvas = Animation.getNewWinCanvas();
-
-		this.moveResizeCanvas(oldWinCanvas, this.x, this.y, w, h);
-		this.moveResizeCanvas(newWinCanvas, this.x, this.y, w, h);
-
-		oldWinCanvas.style.zIndex = oldWinZIndex;
-		newWinCanvas.style.zIndex = newWinZIndex;
-		
-		var oldWin = oldWinCanvas.getContext("2d");
-		var newWin = newWinCanvas.getContext("2d");
-
-		if(this.showWin) {
-			oldWin.drawImage(Animation.backendCanvas, 0, 0, w, h, 0, 0, w, h);
-			newWin.drawImage(Animation.backendCanvas, this.w, 0, w, h, 0, 0, w, h);
-		}
-		else {
-			newWin.drawImage(Animation.backendCanvas, 0, 0, w, h, 0, 0, w, h);
-			oldWin.drawImage(Animation.backendCanvas, this.w, 0, w, h, 0, 0, w, h);
-		}
-
-		this.oldWinCanvas = oldWinCanvas;
-		this.newWinCanvas = newWinCanvas;
-
-		this.onShowCanvas();
-	
-		if(oldWinZIndex > newWinZIndex) {
-			document.body.appendChild(newWinCanvas);
-			document.body.appendChild(oldWinCanvas);
-		}
-		else {
-			document.body.appendChild(newWinCanvas);
-			document.body.appendChild(oldWinCanvas);
-		}
-
-		return true;
-	}
-	
-	this.show = function() {
-		this.showCanvas(8, 9);
-
-		return true;
-	}
-
-	this.hide = function() {
-		if(this.oldWinCanvas && this.newWinCanvas) {
-			if(this.showWin) {
-				removeCanvas(this.oldWinCanvas);
-				removeCanvas(this.newWinCanvas);
-			}
-			else {
-				removeCanvas(this.oldWinCanvas);
-				removeCanvas(this.newWinCanvas);
-			}
-			this.newWinCanvas = null;
-			this.oldWinCanvas = null;
-		}
-
-		return true;
-	}
-
-	this.afterRun = function() {
-	}
-
-	this.doStep = function(percent) {
-		this.step(percent);
-		return;
-	}
-
-	this.step = function(percent) {
-		var scale = this.from + percent * (this.to - this.from);
-		var alpha = percent;
-		scaleElement(this.newWinCanvas, scale, alpha);
-
-		return true;
-	}
-}
-
-function AnimationBrowserScaleWin(showWin) {
-	AnimationBrowser.apply(this, arguments);
-	
-	this.onShowCanvas = function() {
-		setElementPosition(this.oldWinCanvas, this.x, this.y);
-		setElementPosition(this.newWinCanvas, this.x, this.y);
-		showElement(this.oldWinCanvas);
-		hideElement(this.newWinCanvas);
-
-		return;
-	}
-	
-	this.step = function(percent) {
-		var alpha = percent;
-		var scale = this.from + percent * (this.to - this.from);
-
-		scaleElement(this.newWinCanvas, scale, alpha);
-
-		return true;
-	}
-}
-
-function AnimationBrowserScaleDialog(showWin) {
-	AnimationBrowser.apply(this, arguments);
-	
-	this.show = function() {
-		if(this.showWin) {
-			this.showCanvas(8, 9);
-		}
-		else {
-			this.showCanvas(9, 8);
-		}
-
-		return true;
-	}
-	
-	this.step = function(percent) {
-		var scale = this.from + percent * (this.to - this.from);
-		var alpha = this.showWin ? percent : 1-percent;
-
-		if(this.showWin) {
-			scaleElement(this.newWinCanvas, scale, alpha);
-		}
-		else {
-			scaleElement(this.oldWinCanvas, scale, alpha);
-		}
-
-		return true;
-	}
-}
-
-function AnimationBrowserAlpha(showWin) {
-	AnimationBrowser.apply(this, arguments);
-	
-	this.show = function() {
-		if(this.showWin) {
-			this.showCanvas(8, 9);
-		}
-		else {
-			this.showCanvas(9, 8);
-		}
-	}
-
-	this.step = function(percent) {
-		var alpha = this.from + percent * (this.to - this.from);
-
-		if(this.showWin) {
-			alphaElement(this.newWinCanvas, alpha);
-		}
-		else {
-			alphaElement(this.oldWinCanvas, alpha);
-		}
-
-		return true;
-	}
-}
-function AnimationBrowserMove(showWin) {
-	AnimationBrowser.apply(this, arguments);
-
-	this.onShowCanvas = function() {
-		if(this.showWin) {
-			setElementPosition(this.oldWinCanvas, this.x, this.y);
-			setElementPosition(this.newWinCanvas, this.x, this.frontH);
-		}
-		else {
-			setElementPosition(this.oldWinCanvas, this.x, this.y);
-			setElementPosition(this.newWinCanvas, this.x, this.y);
-		}
-		showElement(this.oldWinCanvas);
-		showElement(this.newWinCanvas);
-
-		return;
-	}
-
-	this.show = function() {
-		if(this.showWin) {
-			this.showCanvas(8, 9);
-		}
-		else {
-			this.showCanvas(9, 8);
-		}
-
-		return;
-	}
-
-	this.step = function(percent) {
-		var oy = 0;
-		this.range = this.frontH;
-		var dy = this.range * percent;
-		if(this.showWin) {
-			oy = this.range - dy;
-			moveElement(this.newWinCanvas, 0, oy);
-		}
-		else {
-			oy = dy;
-			moveElement(this.oldWinCanvas, 0, oy);
-		}
-	
-		return true;
-	}
-}
-
-//////////////////////////////////////////widget animations/////////////////////////////////////////
-
-var C_DIR_UP = 1;
-var C_DIR_DOWN = 2;
-var C_DIR_LEFT = 3;
-var C_DIR_RIGHT = 4;
-var C_ACTION_EXPAND = 1;
-var C_ACTION_COLLAPSE = 2;
-
-function Animation1Expand() {
-	Animation.apply(this, arguments);
-	
-	this.prepare = function(x, y, w, h, canvasImage, onFinish) {
-		this.x = Math.round(x);
-		this.y = Math.round(y);
-		this.w = Math.round(w);
-		this.h = Math.round(h);
-		this.onFinish = onFinish;
-		this.canvasImage = canvasImage;
-		
-		this.xto = this.xfrom = 0;
-		this.yto = this.yfrom = 0;
-		this.wto = this.wfrom = w;
-		this.hto = this.hfrom = h;
-		
-		this.show();
-
-		return;
-	}
-
-	this.expandV = function(up) {
-		this.direction = up? C_DIR_UP : C_DIR_DOWN;
-		this.action =  C_ACTION_EXPAND;
-		this.yfrom = this.h;
-		this.yto = 0;
-		this.hfrom = 0;
-		this.hto = this.h;
-
-		return;
-	}
-	
-	this.expandH = function(left) {
-		this.direction = left ? C_DIR_LEFT : C_DIR_RIGHT;
-		this.action =  C_ACTION_EXPAND;
-		this.xfrom = this.w;
-		this.xto = 0;
-		this.wfrom = 0;
-		this.wto = this.w;
-
-		return;
-	}
-	
-	this.collapseV = function(up) {
-		this.direction = up? C_DIR_UP : C_DIR_DOWN;
-		this.action =  C_ACTION_COLLAPSE;
-		this.yfrom = 0;
-		this.yto = this.h;
-		this.hfrom = this.h;
-		this.hto = 0;
-
-		return;
-	}
-	
-	this.collapseH = function(left) {
-		this.direction = left ? C_DIR_LEFT : C_DIR_RIGHT;
-		this.action =  C_ACTION_COLLAPSE;
-		this.xfrom = 0;
-		this.xto = this.w;
-		this.wfrom = this.w;
-		this.wto = 0;
-
-		return;
-	}
-
-	this.expandUp = function() {
-		return this.expandV(true);
-	}
-	
-	this.expandDown = function() {
-		return this.expandV(false);
-	}
-
-	this.expandLeft = function() {
-		return this.expandH(true);
-	}
-
-	this.expandRight = function() {
-		return this.expandH(false);
-	}
-
-	this.collapseUp = function() {
-		return this.collapseV(true);
-	}
-	
-	this.collapseDown = function() {
-		return this.collapseV(false);
-	}
-
-	this.collapseLeft = function() {
-		return this.collapseH(true);
-	}
-
-	this.collapseRight = function() {
-		return this.collapseH(false);
-	}
-
-	this.show = function() {
-		this.canvasElement = Animation.getCanvas(); 
-		this.moveResizeCanvas(this.canvasElement, this.x, this.y, this.w, this.h);
-		this.canvas = this.canvasElement.getContext("2d");
-		document.body.appendChild(this.canvasElement);
-		this.canvasElement.style.zIndex = 9;
-		setElementPosition(this.canvasElement, this.x, this.y);
-		showElement(this.canvasElement);
-
-		return true;
-	}
-
-	this.hide = function() {
-		this.visible = false;
-		if(this.canvasElement) {
-			document.body.removeChild(this.canvasElement);
-			this.canvasElement = null;
-		}
-
-		return true;
-	}
-
-	this.step = function(percent) {
-		var canvas = this.canvas;
-		var x = this.xfrom + ((this.xto - this.xfrom) * percent);
-		var y = this.yfrom + ((this.yto - this.yfrom) * percent);
-		
-		var w = this.wfrom + (this.wto - this.wfrom) * percent;
-		var h = this.hfrom + (this.hto - this.hfrom) * percent;
-
-		if(!w || !h) {
-			return;
-		}
-
-		canvas.clearRect(0, 0, this.w, this.h);
-		
-		var dx = x;
-		var dy = y;
-		var sx = x;
-		var sy = y;
-
-		if(this.action === C_ACTION_EXPAND) {
-			switch(this.direction) {
-				case C_DIR_UP: {
-					sy = 0;			
-					break;
-				}
-				case C_DIR_DOWN: {
-					dy = 0;			
-					break;
-				}
-				case C_DIR_LEFT: {
-					sx = 0;			
-					break;
-				}
-				case C_DIR_RIGHT: {
-					dx = 0;			
-					break;
-				}
-			}
-		}
-		else {
-			switch(this.direction) {
-				case C_DIR_UP: {
-					dy = 0;			
-					break;
-				}
-				case C_DIR_DOWN: {
-					sy = 0;			
-					break;
-				}
-				case C_DIR_LEFT: {
-					dx = 0;			
-					break;
-				}
-				case C_DIR_RIGHT: {
-					sx = 0;			
-					break;
-				}
-			}
-		}
-
-		//console.log("y:" + y + " h:" + h);
-		canvas.drawImage(this.canvasImage, sx, sy, w, h, dx, dy, w, h);
-		//canvas.fillRect(dx, dy, w, h);
-
-		return true;
-	}
-}
-
-function Animation1Alpha() {
-	Animation.apply(this, arguments);
-	
-	this.prepare = function(x, y, w, h, canvasImage, onFinish) {
-		this.x = Math.round(x);
-		this.y = Math.round(y);
-		this.w = Math.round(w);
-		this.h = Math.round(h);
-		this.onFinish = onFinish;
-		this.canvasImage = canvasImage;
-		
-		this.show();
-
-		return;
-	}
-
-	this.setRange = function(from, to) {
-		this.from = from;
-		this.to = to;
-
-		return;
-	}
-	
-	this.show = function() {
-		this.canvasElement = Animation.getCanvas(); 
-		this.moveResizeCanvas(this.canvasElement, this.x, this.y, this.w, this.h);
-		this.canvas = this.canvasElement.getContext("2d");
-		document.body.appendChild(this.canvasElement);
-		this.canvasElement.style.zIndex = 9;
-		setElementPosition(this.canvasElement, this.x, this.y);
-		showElement(this.canvasElement);
-
-		this.canvas.drawImage(this.canvasImage, 0, 0, this.w, this.h, 0, 0, this.w, this.h);
-
-		return true;
-	}
-
-	this.hide = function() {
-		this.visible = false;
-		if(this.canvasElement) {
-			try {
-				document.body.removeChild(this.canvasElement);
-			}catch(e) {
-				console.log("document.body.removeChild: not found.");
-			}
-			this.canvasElement = null;
-		}
-
-		return true;
-	}
-
-	this.step = function(percent) {
-		var canvas = this.canvas;
-		var opacity = this.from + (this.to - this.from) * percent;
-
-		alphaElement(this.canvasElement, opacity);
-		console.log("opacity:" + opacity);
-		return true;
-	}
-}
-
-function Animation1Scale() {
-	Animation.apply(this, arguments);
-	
-	this.prepare = function(x, y, w, h, canvasImage, onFinish) {
-		this.x = Math.round(x);
-		this.y = Math.round(y);
-		this.w = Math.round(w);
-		this.h = Math.round(h);
-		this.xOrigin = "50%";
-		this.yOrigin = "50%";
-		this.onFinish = onFinish;
-		this.canvasImage = canvasImage;
-		
-		this.show();
-
-		return;
-	}
-
-	this.setOrigin = function(xOrigin, yOrigin) {
-		this.xOrigin = xOrigin;
-		this.yOrigin = yOrigin;
-
-		return;
-	}
-
-	this.setRange = function(from, to) {
-		this.from = from;
-		this.to = to;
-
-		return;
-	}
-	
-	this.show = function() {
-		this.canvasElement = Animation.getCanvas(); 
-		this.moveResizeCanvas(this.canvasElement, this.x, this.y, this.w, this.h);
-		this.canvas = this.canvasElement.getContext("2d");
-		document.body.appendChild(this.canvasElement);
-		this.canvasElement.style.zIndex = 9;
-		setElementPosition(this.canvasElement, this.x, this.y);
-		showElement(this.canvasElement);
-
-		this.canvas.drawImage(this.canvasImage, 0, 0, this.w, this.h, 0, 0, this.w, this.h);
-
-		return true;
-	}
-
-	this.hide = function() {
-		this.visible = false;
-		if(this.canvasElement) {
-			document.body.removeChild(this.canvasElement);
-			this.canvasElement = null;
-		}
-
-		return true;
-	}
-
-	this.step = function(percent) {
-		var canvas = this.canvas;
-		var scale = this.from + (this.to - this.from) * percent;
-		var alpha = this.showWin ? percent : 1-percent;
-
-		scaleElement(this.canvasElement, scale, alpha, this.xOrigin, this.yOrigin);
-
-		return true;
-	}
-}
-
-function animateUIElement(uiElement, animHint, onAnimDone) {
-	var visible = false;
-	var scale = uiElement.getRealScale();
-	var p = uiElement.getPositionInView();
-	var pv = uiElement.view.getAbsPosition();
-
-	var x = Math.round(p.x * scale) + pv.x;
-	var y = Math.round(p.y * scale) + pv.y;
-	var w = Math.round(uiElement.w * scale);
-	var h = Math.round(uiElement.h * scale);
-
-	var canvasElement = Animation.getBackendCanvas(w, h);
-	var canvas = canvasElement.getContext("2d");
-
-	canvas.save();
-	visible = uiElement.visible;
-	uiElement.visible = true;
-	canvas.scale(scale, scale);
-	canvas.translate(-uiElement.x, -uiElement.y);
-	uiElement.paint(canvas);
-	uiElement.visible = visible;
-	canvas.restore();
-
-	var anim = AnimationFactory.create(animHint);
-
-	anim.prepare(x, y, w, h, canvasElement, function() {
-		if(onAnimDone) {
-			onAnimDone();
-		}
-		uiElement.setVisible(!visible);
-		uiElement.postRedraw();
-	});
-
-	if(visible) {
-		uiElement.setVisible(!visible);
-		uiElement.postRedraw();
-	}
-
-	switch(animHint) {
-		case "anim-expand-up": {
-			anim.expandUp();
-			break;
-		}
-		case "anim-expand-left": {
-			anim.expandLeft();
-			break;
-		}
-		case "anim-expand-right": {
-			anim.expandRight();
-			break;
-		}
-		case "anim-expand-down": {
-			anim.expandDown();
-			break;
-		}
-		case "anim-collapse-up": {
-			anim.collapseUp();
-			break;
-		}
-		case "anim-collapse-left": {
-			anim.collapseLeft();
-			break;
-		}
-		case "anim-collapse-right": {
-			anim.collapseRight();
-			break;
-		}
-		case "anim-collapse-down": {
-			anim.collapseDown();
-			break;
-		}
-		case "anim-scale1-show-origin-topleft": {
-			anim.setOrigin("0%", "0%");
-			anim.setRange(0.5, 1.0);
-			break;
-		}
-		case "anim-scale1-show-origin-center": {
-			anim.setOrigin("50%", "50%");
-			anim.setRange(0.5, 1.0);
-			break;
-		}
-		case "anim-scale1-show-origin-bottomleft": {
-			anim.setOrigin("0%", "100%");
-			anim.setRange(0.5, 1.0);
-			break;
-		}
-		case "anim-scale1-show-origin-topright": {
-			anim.setOrigin("100%", "0%");
-			anim.setRange(0.5, 1.0);
-			break;
-		}
-		case "anim-scale1-show-origin-bottomright": {
-			anim.setOrigin("100%", "100%");
-			anim.setRange(0.5, 1.0);
-			break;
-		}
-		case "anim-scale1-show": {
-			anim.setRange(0.5, 1.0);
-			break;
-		}
-		case "anim-scale1-hide-origin-topleft": {
-			anim.setOrigin("0%", "0%");
-			anim.setRange(1.0, 0.5);
-			break;
-		}
-		case "anim-scale1-hide-origin-center": {
-			anim.setOrigin("50%", "50%");
-			anim.setRange(1.0, 0.5);
-			break;
-		}
-		case "anim-scale1-hide-origin-bottomleft": {
-			anim.setOrigin("0%", "100%");
-			anim.setRange(1.0, 0.5);
-			break;
-		}
-		case "anim-scale1-hide-origin-topright": {
-			anim.setOrigin("100%", "0%");
-			anim.setRange(1.0, 0.5);
-			break;
-		}
-		case "anim-scale1-hide-origin-bottomright": {
-			anim.setOrigin("100%", "100%");
-			anim.setRange(1.0, 0.5);
-			break;
-		}
-		case "anim-scale1-hide": {
-			anim.setRange(1.0, 0.5);
-			break;
-		}
-		case "anim-alpha1-show": {
-			anim.setRange(0.2, 1.0);
-			break;
-		}
-		case "anim-alpha1-hide": {
-			anim.setRange(1.0, 0.2);
-			break;
-		}
-	}
-
-	anim.run();
-
-	return;
-}
-
-
-function testAnimation1Expand(uiElement) {
-	var testElement = uiElement.getWindow().findChildByName("ui-button-test", true);
-
-	testElement.setVisible(false);
-	testElement.postRedraw();
-	setTimeout(function() {
-		animateUIElement(testElement, "anim-alpha1-show");
-	}, 100);
-	
-	setTimeout(function() {
-		animateUIElement(testElement, "anim-alpha1-hide");
-	}, 3000);
-
-	return;
 }
 /*
  * File: ui-element.js
@@ -16336,6 +16067,8 @@ UIElement.IMAGE_DISPLAY_TILE_H = WImage.DISPLAY_TILE_H;
 UIElement.IMAGE_DISPLAY_AUTO_SIZE_DOWN = WImage.DISPLAY_AUTO_SIZE_DOWN;
 UIElement.IMAGE_DISPLAY_FIT_WIDTH = WImage.DISPLAY_FIT_WIDTH;
 UIElement.IMAGE_DISPLAY_FIT_HEIGHT = WImage.DISPLAY_FIT_HEIGHT;
+UIElement.IMAGE_DISPLAY_3PATCH_V = WImage.DISPLAY_3PATCH_V;
+UIElement.IMAGE_DISPLAY_3PATCH_H = WImage.DISPLAY_3PATCH_H;
 
 UIElement.HTEXT_ALIGNS = ["left", "center", "right"];
 UIElement.VTEXT_ALIGNS = ["top", "middle", "bottom"];
@@ -16420,6 +16153,11 @@ UIElement.IMAGE_TIPS2          = "tips_img_2";
 UIElement.IMAGE_TIPS3          = "tips_img_3";
 UIElement.IMAGE_TIPS4          = "tips_img_4";
 UIElement.IMAGE_TIPS5          = "tips_img_5";
+
+UIElement.IMAGE_V_SCROLL_BAR_BG = "v-scroll-bar-bg";
+UIElement.IMAGE_V_SCROLL_BAR_FG = "v-scroll-bar-fg";
+UIElement.IMAGE_H_SCROLL_BAR_BG = "h-scroll-bar-bg";
+UIElement.IMAGE_H_SCROLL_BAR_FG = "h-scroll-bar-fg";
 
 UIElement.ITEM_BG_NORMAL  = "item_bg_normal";
 UIElement.ITEM_BG_ACTIVE  = "item_bg_active";
@@ -16506,7 +16244,11 @@ UIElement.prototype.clone = function() {
 }
 
 UIElement.prototype.getRelativePathOfURL = function(url) {
-	if(UIElement.disableGetRelativePathOfURL || !url) {
+	if(UIElement.disableGetRelativePathOfURL || !url || url.indexOf("must-online=true") >= 0) {
+		return url;
+	}
+
+	if(url.indexOf("must-online=true") >= 0) {
 		return url;
 	}
 
@@ -16906,7 +16648,7 @@ UIElement.prototype.onPointerDownEditing = function(point, beforeChild) {
 }
 
 UIElement.prototype.onPointerDownRunning = function(point, beforeChild) {
-	if(this.popupWindow || !this.pointerDown) {
+	if(!this.pointerDown) {
 		return;
 	}
 
@@ -16918,10 +16660,6 @@ UIElement.prototype.onPointerMoveEditing = function(point, beforeChild) {
 }
 
 UIElement.prototype.onPointerMoveRunning = function(point, beforeChild) {
-	if(this.popupWindow) {
-		return;
-	}
-
 	return this.callOnPointerMoveHandler(point, beforeChild);
 }
 
@@ -16930,7 +16668,7 @@ UIElement.prototype.onPointerUpEditing = function(point, beforeChild) {
 }
 
 UIElement.prototype.onPointerUpRunning = function(point, beforeChild) {
-	if(this.popupWindow || !this.pointerDown) {
+	if(!this.pointerDown) {
 		return;
 	}
 
@@ -16960,7 +16698,7 @@ UIElement.prototype.onGesture = function(gesture) {
 }
 
 UIElement.prototype.onLongPress = function(point) {
-	if(this.popupWindow || !this.pointerDown) {
+	if(!this.pointerDown) {
 		return;
 	}
 
@@ -16975,7 +16713,7 @@ UIElement.prototype.onLongPress = function(point) {
 }
 
 UIElement.prototype.onClick = function(point, beforeChild) {
-	if(beforeChild || this.popupWindow || !this.pointerDown) {
+	if(beforeChild || !this.pointerDown) {
 		return;
 	}
 
@@ -17303,6 +17041,26 @@ UIElement.prototype.doAnimate = function(config, onAnimationDone, onAnimationSte
 		this.setY(yStart);
 		yEnd = yStart;
 	}
+
+    if(!scaleXRange) {
+        this.setScaleX(scaleXStart);
+        scaleXEnd = scaleXStart;
+    }
+
+    if(!scaleYRange) {
+        this.setScaleY(scaleYStart);
+        scaleYEnd = scaleYStart;
+    }
+
+    if(!opacityRange && opacityStart) {
+        this.setOpacity(opacityStart);
+        opacityEnd = opacityStart;
+    }
+
+    if(!rotationRange) {
+        this.setRotation(rotationStart);
+        rotationEnd = rotationStart;
+    }
 
 	var c = {};
 
@@ -17923,11 +17681,20 @@ UIElement.prototype.setParent = function(parentShape) {
 	return this;
 }
 
+Object.defineProperty(UIElement.prototype, "name", {
+    set: function(name) {
+        this.detachNameFromParent();
+		this._name = name;
+		this.attachNameToParent();
+    },
+    get: function() {
+        return this._name;
+    }
+});
+
 UIElement.prototype.setName = function(name) {
 	if(this.name !== name) {
-		this.detachNameFromParent();
 		this.name = name;
-		this.attachNameToParent();
 	}
 
 	return this;
@@ -18046,9 +17813,16 @@ UIElement.prototype.fixName = function() {
 	}
 
 	var name = shape.name;
+    
+    if(!this.isInDesignMode()) {
+        shape.name = shape.name + "_" + Date.now() + "_" + Math.round(Math.random() * 10000);
+        return;
+    }
+
+    name = name.replaceAll("-", "_");
 	var prefix = name;
-    var split = name.lastIndexOf('-');
-	var indStr = name.substring(split);
+    var split = name.lastIndexOf('_');
+	var indStr = name.substring(split + 1);
     var i = Math.abs(parseInt(indStr));
     var index;   
  
@@ -18062,11 +17836,11 @@ UIElement.prototype.fixName = function() {
 
 	for(var i = index; i < 1000; i++) {
 		if(parentShape.find(name)) {
-			if(prefix[prefix.length-1] === '-') {
+			if(prefix[prefix.length-1] === '_') {
 				name = prefix + i; 
 			}
 			else {
-				name = prefix +"-"+ i; 
+				name = prefix +"_"+ i;
 			}
 		}
 		else {
@@ -18241,7 +18015,7 @@ UIElement.prototype.removeAll = function() {
 	return;
 }
 
-UIElement.prototype.removeChildren = function() {
+UIElement.prototype.removeChildren = function(destroyThem) {
 	this.targetShape = null;
 	this.pointerEventTarget = null;
 
@@ -18250,13 +18024,18 @@ UIElement.prototype.removeChildren = function() {
 		var iter = this.children[i];
 
 		if(iter.getParent() === this) {
+			iter.onRemoved(this);
 			iter.setParent(null);
 			iter.setView(null);
 			iter.setApp(null);
 		}
 	}
 
-	this.children.length = 0;
+	if(destroyThem) {
+		this.children.clear();
+	}else{
+		this.children.length = 0;
+	}
 
 	return this;
 }
@@ -18278,6 +18057,14 @@ UIElement.prototype.removeChild = function(child, destroyIt, sync) {
 			child = null;
 			me = null;
 		}, 0);
+	}
+	
+	if(this.targetShape === child) {
+		this.targetShape = null;
+	}
+
+	if(this.pointerEventTarget === child) {
+		this.pointerEventTarget = null;
 	}
 
 	return this;
@@ -18391,7 +18178,7 @@ UIElement.prototype.setZIndex = function(index) {
 			}
 		}
 
-		arr.sort(function(a, b) {
+		arr.stableSort(function(a, b) {
 			return a.z - b.z;
 		});
 	}
@@ -18687,35 +18474,35 @@ UIElement.prototype.setImageScale = function(imageScaleX, imageScaleY) {
 	return this;
 }
 
+UIElement.prototype.drawBgImageScale =function(canvas, image, rect, sx, sy) {
+	var w = this._w;
+	var h = this._h;
+	var hw = w >> 1;
+	var hh = h >> 1;
+
+	canvas.save();
+	canvas.translate(hw, hh);
+	canvas.scale(sx, sy);
+	canvas.translate(-hw, -hh);
+
+	WImage.draw(canvas, image, UIElement.IMAGE_DISPLAY_CENTER, 0, 0, w, h, rect);
+	canvas.restore();
+}
+
 UIElement.prototype.drawBgImage =function(canvas) {
 	var wImage = this.getBgImage();
 		
 	if(wImage) {
-		var image = wImage.getImage();
-		var srcRect = wImage.getImageRect();
+		var image = wImage.image;
+		var srcRect = wImage.rect;
 		var display = this.images.display;
-		
-		if(display === UIElement.IMAGE_DISPLAY_SCALE) {
-			if(this.imageScaleX && this.imageScaleY) {
-				var hw = this.w >> 1;
-				var hh = this.h >> 1;
-				var sx = this.imageScaleX || 1;
-				var sy = this.imageScaleY || 1;
+		var scaleX = this.imageScaleX;
+		var scaleY = this.imageScaleY;
 
-				canvas.save();
-				canvas.translate(hw, hh);
-				canvas.scale(sx, sy);
-				canvas.translate(-hw, -hh);
-
-				this.drawImageAt(canvas, image, UIElement.IMAGE_DISPLAY_CENTER, 0, 0, this.w, this.h, srcRect);
-				canvas.restore();
-			}
-			else {
-				this.drawImageAt(canvas, image, UIElement.IMAGE_DISPLAY_SCALE, 0, 0, this.w, this.h, srcRect);
-			}
-		}
-		else {
-			this.drawImageAt(canvas, image, this.images.display, 0, 0, this.w, this.h, srcRect);
+		if((scaleX === 1 && scaleY === 1) || (!scaleX && !scaleY) || display !== UIElement.IMAGE_DISPLAY_SCALE) {
+			WImage.draw(canvas, image, display, 0, 0, this.w, this.h, srcRect);
+		}else{
+			this.drawBgImageScale(canvas, image, srcRect, scaleX, scaleY);
 		}
 	}
 
@@ -18750,9 +18537,12 @@ UIElement.prototype.prepareStyle = function(canvas) {
 }
 
 UIElement.prototype.updateTransform = function(canvas) {
+	if(this.events["onUpdateTransform"] || this.hasEventListener("updatetransform")) {
+		if(!this.isInDesignMode()) {
+			this.callOnUpdateTransformHandler(canvas);
+		}
+	}
 	
-	this.callOnUpdateTransformHandler(canvas);
-
 	return;
 }
 
@@ -18945,9 +18735,10 @@ UIElement.prototype.paintSelf = function(canvas) {
 	canvas.save();
 	this.translate(canvas);
 
-	if(this.events["onUpdateTransform"] && !animating) {
+	if(!animating) {
 		this.updateTransform(canvas);
 	}
+
 	if(this.highlightConfig) {
 		this.updateHighlightTransform(canvas);
 	}
@@ -19118,7 +18909,6 @@ UIElement.prototype.childrenFromJson = function(js) {
 				shape.z = jsShape.z;
 				if(this.addShapeDirectly(shape)) {
 					shape.fromJson(jsShape);
-					shape.attachNameToParent();
 				}
 			}
 		}
@@ -19166,7 +18956,9 @@ UIElement.prototype.doFromJson = function(js) {
 
 	if(js.animations) {
 		this.animations = js.animations;
-	}
+	} else if(this.animations) {
+        delete this.animations;
+    }
 
 	if(js.handle) {
 		this.handle = {};
@@ -19498,7 +19290,6 @@ UIElement.prototype.dupChild = function(name, zIndex) {
 
 		this.addShape(shape, false, null, zIndex);
 		shape.fixName();
-		shape.attachNameToParent();
 
 		return shape;
 	}
@@ -19815,15 +19606,19 @@ UIElement.prototype.onImageLoad = function() {
 	this.postRedraw();
 }
 
+UIElement.prototype.getDefaultImageType = function() {
+	return UIElement.IMAGE_DEFAULT;
+}
+
 UIElement.prototype.setImage = function(type, src) {
 	var me = this;
 	var n = arguments.length;
 	if(n < 2) {
 		src = type;
-		type = UIElement.IMAGE_DEFAULT;
+		type = this.getDefaultImageType();
 	}
 	else {
-		type = type ? type : UIElement.IMAGE_DEFAULT;
+		type = type ? type : this.getDefaultImageType();
 	}
 
 	var image = null;
@@ -20440,13 +20235,7 @@ UIElement.prototype.relayoutChildren = function() {
 }
 
 UIElement.prototype.getWindowManager = function() {
-	var iter = this;
-
-	while(iter != null && !iter.isUIWindowManager) {
-		iter = iter.parentShape;
-	}
-
-	return iter;
+	return UIWindowManager.getInstance();
 }
 
 UIElement.prototype.getDevice = function() {
@@ -20472,6 +20261,15 @@ UIElement.prototype.getTopWindow = function() {
 	var wm = this.getWindowManager();
 
 	return wm.getCurrentWindow();
+}
+
+UIElement.prototype.setAssetsLoadingWindow = function(name) {
+	var wm = this.getWindowManager();
+	if(wm) {
+		wm.setAssetsLoadingWindow(name);
+	}
+
+	return this;
 }
 
 UIElement.prototype.isTopWindow = function() {
@@ -20539,9 +20337,9 @@ UIElement.prototype.globalToLocal = function(point) {
 }
 
 UIElement.prototype.getWindowNames = function() {
-	var manager = this.getWindowManager();
-	if(manager) {
-		return manager.getWindowNames();
+	var wm = this.getWindowManager();
+	if(wm) {
+		return wm.getWindowNames();
 	}
 
 	return [];
@@ -20555,34 +20353,34 @@ UIElement.prototype.openScene = function(name, initData) {
 }
 
 UIElement.prototype.isWindowOpen = function(name) {
-	var manager = this.getWindowManager();
-	var win = manager.find(name);
+	var wm = this.getWindowManager();
+	var win = wm.find(name);
 
 	return win && win.isOpen();
 }
 
 UIElement.prototype.openWindow = function(name, onClose, closeCurrent, initData, options) {
-	var manager = this.getWindowManager();
-	if(manager) {
-		return manager.openWindow(name, onClose, closeCurrent, initData, options);
+	var wm = this.getWindowManager();
+	if(wm) {
+		return wm.openWindow(name, onClose, closeCurrent, initData, options);
 	}
 
 	return false;
 }
 
 UIElement.prototype.closeAllWindows = function() {
-	var manager = this.getWindowManager();
-	if(manager) {
-		manager.closeAll();
+	var wm = this.getWindowManager();
+	if(wm) {
+		wm.closeAll();
 	}
 
 	return;
 }
 
 UIElement.prototype.backToHomeWin = function() {
-	var manager = this.getWindowManager();
-	if(manager) {
-		manager.backToHomeWin();
+	var wm = this.getWindowManager();
+	if(wm) {
+		wm.backToHomeWin();
 	}
 
 	return;
@@ -20590,11 +20388,11 @@ UIElement.prototype.backToHomeWin = function() {
 
 UIElement.prototype.closeWindow = function(retInfo, syncClose) {
 	var win = this.getWindow();
-	var manager = this.getWindowManager();
+	var wm = this.getWindowManager();
 
-	if(manager && win) {
+	if(wm && win) {
 		if(win.isOpen()) {
-			return manager.closeCurrentWindow(retInfo, syncClose);
+			return wm.closeWindow(win, retInfo, syncClose);
 		}
 		else {
 			console.log("Current Window Is Not Open.");
@@ -20864,26 +20662,11 @@ UIElement.setTimeout = function(func, deltaTime) {
 }
 
 UIElement.getMainCanvas = function() {
-	return CantkRT.getMainCanvas();
+    return CantkRT.getMainCanvas();
 }
 
 UIElement.getMainCanvasScale = function(force) {
-	if(!UIElement.canvasScale || force) {
-		var xScale = 1;
-		var yScale = 1;
-		UIElement.canvasScale = {};
-		var mainCanvas = UIElement.getMainCanvas();
-		
-		if(mainCanvas.style.width && mainCanvas.style.height) {
-			xScale = mainCanvas.width/parseFloat(mainCanvas.style.width);
-			yScale = mainCanvas.height/parseFloat(mainCanvas.style.height);
-		}
-
-		UIElement.canvasScale.x = xScale;
-		UIElement.canvasScale.y = yScale;
-	}
-
-	return UIElement.canvasScale;
+	return CantkRT.getMainCanvasScale();
 }
 
 UIElement.prototype.isFullscreenMode = function() {
@@ -21242,15 +21025,19 @@ UIElement.prototype.clearAssetsCache = function(check) {
 	return this;
 }
 
-UIElement.prototype.loadAssets = function(winList, onProgress) {
+UIElement.prototype.loadAssets = function(winList, onLoadProgress, onDownloadProgress) {
 	ResLoader.reset();
-	this.getWindowManager().loadAssets(winList, onProgress);
+	this.getWindowManager().loadAssets(winList, onLoadProgress, onDownloadProgress);
 
 	return this;
 }
 
 UIElement.prototype.createElement = function(type) {
 	return ShapeFactoryGet().createShape(type, C_CREATE_FOR_PROGRAM);
+}
+
+UIElement.prototype.isWebGLRenderer = function() {
+	return WWindowManager.getInstance().isWebGLRenderer();
 }
 
 ShapeFactoryGet().addShapeCreator(new UIElementCreator("ui-element"));
@@ -21589,6 +21376,20 @@ Object.defineProperty(UIElement.prototype, "win", {
  */
 
 /**
+ * @method setAssetsLoadingWindow 
+ * 指定资源加载窗口。对于大型游戏，在初始时只加载部分场景/窗口的资源，其它场景/窗口有两种方式加载：
+ *
+ * 1.在主场景打开后，调用loadAssets在后台预加载其它场景/窗口。
+ *
+ * 2.在打开某个场景/窗口时，自动加载对应的资源，此时可以用setAssetsLoadingWindow指定一个显示加载进度的窗口。
+ *
+ * 该窗口上需要有一个UIProgressBar(用于显示进度)和一个UILabel(用于显示状态)。
+ *
+ * @param {String} name 资源加载窗口的名称。
+ * @return {UIElement} 返回控件本身。
+ */
+
+/**
  * @method getText
  * 获取控件的文本内容，如控件上的文字。
  * @return {String} 文本内容。
@@ -21774,6 +21575,12 @@ Object.defineProperty(UIElement.prototype, "win", {
  */
 
 /**
+ * @method getWindowManager
+ * 获取窗口管理器。
+ * @return {UIWindowManager} 窗口管理器。
+ */
+
+/**
  * @method getTopWindow
  * 获取当前最上层的窗口(普通窗口/对话框/场景)。
  * @return {UIWindow} 当前最上层的窗口。
@@ -21876,6 +21683,18 @@ Object.defineProperty(UIElement.prototype, "win", {
  *     this.setImage(UIElement.IMAGE_NORMAL, 0);
  *     this.setImage(UIElement.IMAGE_ACTIVE, 1);
  *
+ */
+
+/**
+ * @method setImageScale
+ * 设置图片按比例缩放显示。
+ * @param {Number} imageScaleX 宽度缩放比例。
+ * @param {Number} imageScaleY 高度缩放比例。
+ *
+ * 如果图片使用的缩放显示，你在程序中通过setSize调整大小后，或者为图片设置url之后，希望图片填充到控件大小，请按如下方式调用一下此方法。
+ *
+ *      @example small frame
+ *      this.setImageScale(0, 0);
  */
 
 /**
@@ -22456,8 +22275,9 @@ Object.defineProperty(UIElement.prototype, "win", {
  * @method addEventListener
  *
  * 注册事件的回调函数。
- * @param {String} type 事件的类型。目前支持"updatetransform","pointerdown","pointermove","pointerup","click","removed","changing","change","moved","begincontact","endcontact","becomezero","becomefull","timer","open","close","scrolldone","scrolling"。
+ * @param {String} type 事件的类型。目前支持"animatedone","beforeopen","begincontact","postsolve","presolve","swipeleft","swiperight","swipeup","swipedown","changed","changing","becomezero","becomefull","click","doubleclick","close","timeout","dragend","dragging","dragstart","endcontact","focusin","focusout","init","keydown","keyup","load","moved","open","paint","pointerdown","pointermove","multitouch","pointerup","removed","scrolling","scrolldone","switchtoback","switchtofront","deviceorientation","updatetransform"，具体请查看控件支持的事件。
  * @param {Function} callback 回调函数。原型为callback(event)。callback中的this为对应的控件, event的成员变量与对应事件的参数一致。
+ *
  *
  * 注意：回调函数返回true时终止后续回调函数的处理。
  *
@@ -22481,6 +22301,13 @@ Object.defineProperty(UIElement.prototype, "win", {
  *         win.addEventListener("close", onClose);
  *     }
  *
+ * addEventListener也可以用on代替，如：
+ *
+ *     @example small frame
+ *         function onClose(event) {
+ *             console.log("dialog closed with:" + JSON.stringify(event.retInfo));
+ *         }
+ *         win.on("close", onClose);
  *
  * 一个用户自定义事件的示例：
  *
@@ -22515,6 +22342,14 @@ Object.defineProperty(UIElement.prototype, "win", {
  * @param {String} type 事件的类型。参考addEventListener。
  * @param {Function} callback 回调函数。
  *
+ *
+ *     @example small frame
+ *         button.addEventListener("click", onClick);
+ *
+ * removeEventListener也可以用off代替，如：
+ *
+ *     @example small frame
+ *         button.off("click", onClick);
  */
 
 /**
@@ -22522,7 +22357,9 @@ Object.defineProperty(UIElement.prototype, "win", {
  * 加载指定场景的资源。在缺省资源加载窗口中，可以指定预先加载部分场景的资源，其它资源可以通过本函数在需要时加载。
  * @param {Array} scenesNameList 要加载资源的场景名称数组。
  * @param {Function} onProgress(percent, finished, total) 加载进度的回调函数。
+ * @param {Function} onDownloadProgress(percent, finished, total) 下载进度的回调函数。
  * @return {UIElement} 返回控件本身。
+ *
  *
  * 示例：
  *
@@ -22734,7 +22571,7 @@ UIGroup.prototype.onPositionChanged = function() {
 
 	for(var i = 0; i < n; i++) {
 		var iter = children[i];
-		if(iter.isUIBody || iter.isUIGroup){
+		if(iter.isUIBody || iter.isUIGroup || iter.isUIEdge){
 			iter.onPositionChanged();
 		}
 	}
@@ -22802,6 +22639,9 @@ function UIWindow() {
 /**
  * @event onBeforeOpen
  * 窗口已经创建，但是还没有显示出来。
+ *
+ * 注意：请不要在onBeforeOpen事件再打开另外一个窗口，否则可能出现不可预料的错误。
+ *
  * @param {Object} initData 初始化参数，此参数是从openWindow方法传过来的。
  *
  */
@@ -23046,13 +22886,13 @@ UIWindow.prototype.saveProps = ["openAnimationDuration", "closeAnimationDuration
 "closeWhenPointerUpOutside", "refLinesV", "refLinesH", "windowNameToBeOpen", "preloadWindows", "isUILoadingWindowV2", "isUILoadingWindow", "sceneId"];
 
 UIWindow.prototype.fromJson = function(json) {
+	this.jsonData = json;
+	this.name = json.name;
+
 	if(json.isUILoadingWindow) {
 		RShape.prototype.fromJson.call(this, json);
 	}
 	else {
-		this.jsonData = json;
-		this.name = json.name;
-
         Object.keys(json.events).forEach(function(ev) {
             this.events[ev] = json.events[ev];
         }, this);
@@ -23165,8 +23005,13 @@ UIWindow.prototype.onModeChanged = function() {
 UIWindow.prototype.removePopupWindow = function(popup) {
 	if(this.popupWindow) {
 		if(this.popupWindow === popup) {
-			this.popupWindow = null;
-			this.targetShape = null;
+			this.popupWindow = popup.popupWindow;
+			if(this.popupWindow) {
+				this.popupWindow.parentWindow = this;
+			}
+
+			popup.parentWindow = null;
+			popup.popupWindow = null;
 
 			return true;
 		}
@@ -23187,6 +23032,9 @@ UIWindow.prototype.setPopupWindow = function(popup) {
 	}
 	else {
 		this.popupWindow = popup;
+		if(popup) {
+			popup.parentWindow = this;
+		}
 	}
 
 	return true;
@@ -23227,6 +23075,9 @@ UIWindow.prototype.dispatchPointerDownToChildren = function(p) {
 }
 
 UIWindow.prototype.onPointerDownNormal = function(point) {
+	this.pointerDownPosition.x = point.x;
+	this.pointerDownPosition.y = point.y;
+
 	if(this.popupWindow) {
 		this.popupWindow.onPointerDownNormal(point)
 		this.setTarget(this.popupWindow);
@@ -23269,7 +23120,11 @@ UIWindow.prototype.onPointerUpNormal = function(point) {
 			return true;
 		}
 	}
-	
+
+	if(!this.pointerDown) {
+		return true;
+	}
+
 	if(!this.isInDesignMode() && this.enable) {
 		var dx = this.lastPosition.x - this.pointerDownPosition.x;
 		var dy = this.lastPosition.y - this.pointerDownPosition.y;
@@ -23302,7 +23157,11 @@ UIWindow.prototype.onPointerUpNormal = function(point) {
 }
 
 UIWindow.prototype.paintSelfOnly =function(canvas) {
-	canvas.globalAlpha =  this.opacity;
+	var opacity = this.opacity;
+	if(opacity !== 1) {
+		canvas.globalAlpha *= opacity;
+	}
+
 	this.clearBackground(canvas);
 	this.drawBgImage(canvas);
 
@@ -23323,6 +23182,7 @@ UIWindow.prototype.paintSelf = function(canvas) {
 	else {
 		canvas.save();
 		this.translate(canvas);
+        this.updateTransform(canvas);
 		this.paintSelfOnly(canvas);
 		
 		this.beforePaintChildren(canvas);
@@ -23331,7 +23191,7 @@ UIWindow.prototype.paintSelf = function(canvas) {
 		canvas.restore();
 	}
 
-	if(this.popupWindow) {
+	if(this.popupWindow && !this.popupWindow.closePending) {
 		canvas.timeStep = this.popupWindow.scaleTime(timeStep);
 		this.popupWindow.paintSelf(canvas);
 	}
@@ -23377,7 +23237,7 @@ UIWindow.prototype.setCloseWhenPointerUpOutside = function(closeWhenPointerUpOut
 }
 
 UIWindow.prototype.isAnimationEnabled = function() {
-	if(CantkRT.isNative()) return false;
+	//if(CantkRT.isNative()) return false;
 
 	return this.animHint && this.animHint !== "none";
 }
@@ -23438,7 +23298,10 @@ UIWindow.prototype.isSplashWindow = function() {
 }
 
 UIWindow.prototype.getSupportedAnimations = function() {
-	var animations = ["none", "default", "scale", "fade", "popup", "htranslate", "vtranslate"];
+	var animations = ["none", "default", "scale", "fade", "popup"];
+	if(!this.isUIDialog) {
+        animations = animations.concat(["htranslate", "vtranslate"]);
+    }
 
 	return animations;
 }
@@ -23465,7 +23328,7 @@ UIWindow.prototype.clearBackground =function(canvas) {
 
 	if(!this.isFillColorTransparent()) {
 		canvas.beginPath();
-		canvas.fillStyle = this.style.fillColor;
+        canvas.fillStyle = this.style.fillColor;
 		canvas.fillRect(0, 0, this.w, this.h);
 	}
 
@@ -23550,7 +23413,7 @@ UIWindow.prototype.onInit = function() {
 }
 
 UIWindow.prototype.prepareForOpen = function() {
-	if(!this.isUILoadingWindow && this.jsonData) {
+	if((!this.isUILoadingWindow || this.children.length < 1) && this.jsonData) {
 		this.fromJsonNow(this.jsonData);
 	}
 
@@ -23561,10 +23424,16 @@ UIWindow.prototype.prepareForOpen = function() {
 }
 
 UIWindow.prototype.callOnBeforeOpen = function(initData) {
+	this._open = true;
+	var wm = this.getParent();
+	if(wm && wm.hasEventListener("windowopen")) {
+		var event = wm.createEvent("windowopen");
+		event.win = this;
+		wm.dispatchEvent(event);
+	}
+
 	this.show();
 	this.init();
-	this._open = true;
-
 	return this.callOnBeforeOpenHandler(initData);
 }
 
@@ -23607,6 +23476,14 @@ UIWindow.prototype.callOnOpen = function(initData) {
 
 UIWindow.prototype.callOnClose = function(retInfo) {
 	this._open = false;
+    delete this.closePending;
+
+	var wm = this.getParent();
+	if(wm && wm.hasEventListener("windowclose")) {
+		var event = wm.createEvent("windowclose");
+		event.win = this;
+		wm.dispatchEvent(event);
+	}
 
 	if(this.onClose) {
 		try {
@@ -23631,7 +23508,22 @@ UIWindow.prototype.callOnClose = function(retInfo) {
 	this.clearAllIntervals();
 
 	var arr = this.children;
+	for(var i = 0; i < arr.length; i++) {
+		var iter = arr[i];
+		iter.detachNameFromParent();
+	}
+
 	this.children = [];
+
+	if(this.parentWindow) {
+		this.parentWindow.popupWindow = this.popupWindow;
+	}
+	if(this.popupWindow) {
+		this.popupWindow.parentWindow = this.parentWindow;
+	}
+
+	this.popupWindow = null;
+	this.parentWindow = null;
 
 	setTimeout(function() {
 		arr.clear(true);
@@ -23764,21 +23656,46 @@ UIWindow.prototype.clearAllTimeouts = function() {
 	this.timeouts.length = 0;
 }
 
-UIWindow.prototype.loadInitAssets = function(bar, preloadWindows) {
+UIWindow.prototype.loadInitAssets = function(bar, preloadWindows, label) {
+	var win = this;
+
+	function doLoadInitAssets(evt) {
+		if(evt.percent > 99.9) {
+			win.doLoadInitAssets(bar, preloadWindows, label);
+			ResLoader.off(ResLoader.EVENT_ASSETS_LOAD_PROGRESS, doLoadInitAssets);
+		}
+	}
+
+	if(ResLoader.isLoadCompleted()) {
+		win.doLoadInitAssets(bar, preloadWindows, label);
+	}else{
+		ResLoader.on(ResLoader.EVENT_ASSETS_LOAD_PROGRESS, doLoadInitAssets);
+	}
+}
+
+UIWindow.prototype.doLoadInitAssets = function(bar, preloadWindows, label) {
 	var win = this;
 	var wm = win.getParent();
-
+	
 	if(!bar) {
 		bar = win.findChildByType("ui-progressbar");
+	}
+	
+	if(!label) {
+		label = win.findChildByType("ui-label");
 	}
 	
 	if(!preloadWindows) {
 		preloadWindows = win.preloadWindows;
 	}
 	
-	function onProgress(percent, loadedNr, totalNr) {
+	function onLoadProgress(percent, loadedNr, totalNr) {
+		if(label) {
+			label.setText("Loading...");
+		}
+
 		if(bar) {
-			bar.setPercent(percent);
+			bar.setPercent(percent, true);
 		}
 		
         var initWin = wm.getInitWindow();
@@ -23787,15 +23704,46 @@ UIWindow.prototype.loadInitAssets = function(bar, preloadWindows) {
 		}
 		
 		win.postRedraw();
-		console.log("Resloading:" + percent + "%(" + loadedNr + "/" + totalNr + ")");	 
 	}
 
-	var winNamesArr = preloadWindows ? preloadWindows.split(",") : null;
-	wm.loadAssets(winNamesArr, onProgress, true);
+	function onDownloadProgress(percent, loadedNr, totalNr) {
+		if(label) {
+			if(percent >= 100) {
+				label.setText("Loading...");
+			}else{
+				label.setText("Downloading...");
+			}
+		}
+
+		if(bar) {
+			if(percent >= 100) {
+				if(AssetsDownloader.isAvailable()) {
+					wm.loadAudios();
+					wm.loadFonts();
+				}
+
+				bar.setPercent(0, true);
+			}else {
+				bar.setPercent(percent, true);
+			}
+		}
+	}
+
+	var winNamesArr = preloadWindows ? preloadWindows.split(",") : wm.getWindowNames(this);
+	if(AssetsDownloader.isAvailable()) {
+		winNamesArr.push("__audios__");
+		winNamesArr.push("__fonts__");
+	}else{
+		wm.loadAudios();
+		wm.loadFonts();
+	}
+
+	wm.loadAssets(winNamesArr, onLoadProgress, onDownloadProgress);
+
+	this.loadInitAssets = function() {}
 
 	return this;
 }
-
 
 UIWindow.prototype.relayout = function() {
 	if(!this.getWindowManager().isDeviceDirectionOK()) {
@@ -24058,7 +24006,7 @@ UIEdit.prototype.onClick = function(point, beforeChild) {
 		this.editText();
 	}
 
-	return;
+    return this.callOnClickHandler(point);
 }
 
 UIEdit.prototype.getWidth = function(withoutBorder) {
@@ -24071,26 +24019,19 @@ UIEdit.prototype.getWidth = function(withoutBorder) {
 }
 
 UIEdit.prototype.getEditorRect = function() {
+	var leftMargin = this.leftMargin || 0;
 	var p = this.getPositionInView();
+	var cp = CantkRT.getMainCanvasPosition();
 	var vp = this.view.getAbsPosition();
 	var scale = this.view.getViewScale();
-	var ox = vp.x;
-	var oy = vp.y;
-	var leftMargin = this.leftMargin || 0;
 
-	var y = p.y * scale + oy;
-	var x = (p.x + leftMargin) * scale + ox;
-	var w = this.getWidth(true) * scale;
-	var h = this.getHeight() * scale;
-
-	var rect = {};
+	var canvasScale = UIElement.getMainCanvasScale();
+	var x = (vp.x + (p.x + leftMargin) * scale)/canvasScale.x + cp.x;
+	var y = (vp.y + p.y * scale)/canvasScale.y + cp.y;
+	var w = (this.getWidth(true) * scale)/canvasScale.x;
+	var h = (this.getHeight() * scale)/canvasScale.y;
 	
-	scale = UIElement.getMainCanvasScale();
-	rect.x = Math.round(x/scale.x);
-	rect.y = Math.round(y/scale.y);
-	rect.w = Math.round(Math.max(60, w) / scale.x);
-	rect.h = Math.round(h/scale.y);
-
+	var rect = {x:x, y:y, w:w, h:h};
 	if(this.isInDesignMode()) {
 		var radtio = window.devicePixelRatio || 1;
 		rect.x *= radtio;
@@ -24116,6 +24057,7 @@ UIEdit.prototype.editText = function(point) {
 		shape.editing = true;
 		editor.setTextColor(this.style.textColor);
 		editor.showBorder(this.isInDesignMode());
+        editor.show();
 
 		function onChanged(text) {
 			if(text !== shape.text) {
@@ -24568,25 +24510,22 @@ UIHtml.prototype.setPosition = function(x, y) {
 UIHtml.prototype.showHTMLElement = function() {
 	var el = this.element;
 	if(el) {
-		var scale = this.getRealScale();
 		var p = this.getPositionInView();
-		var x = p.x * scale + this.view.getX();
-		var y = p.y * scale + this.view.getY();
-		var w = this.w * scale;
-		var h = this.h * scale;
+		var cp = CantkRT.getMainCanvasPosition();
+		var vp = this.view.getAbsPosition();
+		var scale = this.view.getViewScale();
 
-		UIElement.getMainCanvasScale(true);
-		var scaleX = UIElement.canvasScale.x;
-		var scaleY = UIElement.canvasScale.y;
-
-		x /= scaleX;
-		y /= scaleY;
+		var canvasScale = UIElement.getMainCanvasScale();
+		var x = (vp.x + p.x * scale)/canvasScale.x + cp.x;
+		var y = (vp.y + p.y * scale)/canvasScale.y + cp.y;
+		var w = (this.getWidth() * scale)/canvasScale.x;
+		var h = (this.getHeight() * scale)/canvasScale.y;
 		
 		el.style.position = "absolute";
 		el.style.left = x + "px";
 		el.style.top = y + "px";
-		el.style.width = w/scaleX + "px";
-		el.style.height = h/scaleY + "px";
+		el.style.width = w + "px";
+		el.style.height = h + "px";
 		el.style.visibility = 'visible';
 		
 		this.htmlVisible = true;
@@ -25937,17 +25876,24 @@ function UIScrollViewX() {
 UIScrollViewX.prototype = new UIElement();
 UIScrollViewX.prototype.isUIScrollViewX = true;
 UIScrollViewX.prototype.isUIScrollView = true;
-UIScrollViewX.prototype.saveProps = ["virtualWidth", "virtualHeight", "showOutside", "scrollAnimationDuration", "scrollBgImage"];
+UIScrollViewX.prototype.saveProps = ["virtualWidth", "virtualHeight", "showOutside", "maxAnimationDuration", "scrollBgImage"];
 
 UIScrollViewX.prototype.initUIScrollViewX = function(type) {
 	this.initUIElement(type);
 
 	this.ox = 0;
 	this.oy = 0;
-	this.scrollAnimationDuration = 800;
+	this.xDragLimit = 0.3;
+	this.yDragLimit = 0.3;
+	this.scrollBarOpacity = 0;
+	this.maxAnimationDuration = 10000;
 	this.velocityTracker = new VelocityTracker();
 	this.interpolator =  new DecelerateInterpolator(2);
 	this.setImage(UIElement.IMAGE_DEFAULT, null);
+	this.setImage(UIElement.IMAGE_V_SCROLL_BAR_BG, null);
+	this.setImage(UIElement.IMAGE_V_SCROLL_BAR_FG, null);
+	this.setImage(UIElement.IMAGE_H_SCROLL_BAR_BG, null);
+	this.setImage(UIElement.IMAGE_H_SCROLL_BAR_FG, null);
 	this.setImage("option_image_0", null);
 	this.setImage("option_image_1", null);
 	this.setImage("option_image_2", null);
@@ -26024,10 +25970,34 @@ UIScrollViewX.prototype.setYOffset = function(yOffset) {
 	return this;
 }
 
+UIScrollViewX.prototype.setDragLimit = function(xDragLimit, yDragLimit) {
+	this.xDragLimit = xDragLimit;
+	this.yDragLimit = yDragLimit;
+
+	return this;
+}
+
 UIScrollViewX.prototype.setOffset = function(xOffset, yOffset, noCheck) {
 	if(noCheck) {
-		this.ox = xOffset >> 0;
-		this.oy = yOffset >> 0;
+		var factor = 0;
+		var ox = xOffset >> 0;
+		var oy = yOffset >> 0;
+		var xDragLimit = this.xDragLimit > 1 ? this.xDragLimit : this.xDragLimit * this.w;
+		var yDragLimit = this.yDragLimit > 1 ? this.yDragLimit : this.yDragLimit * this.h; 
+
+		if(ox < -xDragLimit) {
+			ox = -xDragLimit;
+		}else if((this.vw - ox) < (this.w - xDragLimit)) {
+			ox = Math.max(0, this.vw - (this.w - xDragLimit));
+		}
+	
+		if(oy < -yDragLimit) {
+			oy = -yDragLimit;
+		}else if((this.vh - oy) < (this.h - yDragLimit)) {
+			oy = Math.max(0, this.vh - (this.h - yDragLimit));
+		}
+		this.ox = ox;
+		this.oy = oy;
 	}else{
 		this.setXOffset(xOffset);
 		this.setYOffset(yOffset);
@@ -26085,11 +26055,19 @@ UIScrollViewX.prototype.drag = function() {
 	return;
 }
 
+UIScrollViewX.prototype.getScrollDuration = function(velocity) {
+    //t = 2*v / a 
+    var duration = Math.max(Math.abs(velocity.x), Math.abs(velocity.y)) * 2 / 2;
+    
+    return Math.min(duration, this.maxAnimationDuration);
+}
+
 UIScrollViewX.prototype.dragEnd = function() {
-	var duration = this.scrollAnimationDuration;
 	var velocity = this.velocityTracker.getVelocity();
-	
-	if(!duration || duration < 10) {
+   	
+    var duration = this.getScrollDuration(velocity);
+
+    if(!duration || duration < 10) {
 		return;
 	}
 
@@ -26097,10 +26075,10 @@ UIScrollViewX.prototype.dragEnd = function() {
 	var vx = velocity.x;
 	var vy = velocity.y;
 
-	if(UIElement.hScrollHandledBy !== this) {
+	if(UIElement.hScrollHandledBy && UIElement.hScrollHandledBy !== this) {
 		vx = 0;
 	}
-	if(UIElement.vScrollHandledBy !== this) {
+	if(UIElement.hScrollHandledBy && UIElement.vScrollHandledBy !== this) {
 		vy = 0;
 	}
 
@@ -26111,7 +26089,11 @@ UIScrollViewX.prototype.dragEnd = function() {
 	var xe = Math.min(Math.max(0, xs - xd), this.virtualWidth  - this.w);
 	var ye = Math.min(Math.max(0, ys - yd), this.virtualHeight - this.h);
 
-	if(Math.abs(xd) < 10 && Math.abs(yd) < 10) {
+    var cross = this.ox < 0 || this.oy < 0 
+        || this.ox + this.w > this.virtualWidth 
+        || this.oy + this.h > this.virtualHeight;
+	
+    if(!cross && Math.abs(xd) < 10 && Math.abs(yd) < 10) {
 		this.callOnScrollDoneHandler(this.ox, this.oy);
 		return;
 	}
@@ -26164,17 +26146,16 @@ UIScrollViewX.prototype.scrollTo = function(xOffset, yOffset, duration) {
 	var xe = this.fixXOffset(xOffset);
 	var ye = this.fixYOffset(yOffset);
 	
-	if(!duration) {
+	var xd = xe - xs;
+	var yd = ye - ys;
+	if(!duration || (!xd && !yd)) {
 		this.setOffset(xOffset, yOffset);
 		this.callOnScrollDoneHandler(this.ox, this.oy);
 
 		return this;
 	}
 
-	var xd = xe - xs;
-	var yd = ye - ys;
 	var startTime = Date.now();
-
 	function step(now) {
 		var tPercent = (now - startTime)/duration;
 		if(tPercent >= 1) {
@@ -26189,7 +26170,8 @@ UIScrollViewX.prototype.scrollTo = function(xOffset, yOffset, duration) {
 		var ox = xs + xd * percent;
 		var oy = ys + yd * percent;
 		this.setOffset(ox, oy, true);
-		
+		this.scrollBarOpacity = 1 - percent;
+
 		if(tPercent >= 1) {
 			this.callOnScrollDoneHandler(this.ox, this.oy);
 		}
@@ -26218,7 +26200,7 @@ UIScrollViewX.prototype.stepAnimation = function(canvas, now) {
 
 UIScrollViewX.prototype.isDraggable = function() {
 	if(this.isInDesignMode()) {
-		if(this.hitTestResult !== Shape.HIT_TEST_MM) {
+		if(this.hitTestResult !== UIElement.HIT_TEST_MM) {
 			return false;
 		}
 
@@ -26230,6 +26212,7 @@ UIScrollViewX.prototype.isDraggable = function() {
 }
 
 UIScrollViewX.prototype.onPointerDownRunning = UIScrollViewX.prototype.onPointerDownEditing = function(point, beforeChild) {
+	this.scrollBarOpacity = 1;
 	if(!beforeChild && this.isDraggable()) {
 		this.dragStart();
 		return true;
@@ -26250,6 +26233,7 @@ UIScrollViewX.prototype.onPointerUpRunning = UIScrollViewX.prototype.onPointerUp
 		this.dragEnd();
 		return true;
 	}
+	this.scrollBarOpacity = 0;
 
 	return false;
 }
@@ -26265,11 +26249,7 @@ UIScrollViewX.prototype.onClip = function(canvas) {
 		return this;
 	}
 
-	canvas.beginPath();
-	canvas.rect(0, 0, this.w, this.h);
-	canvas.closePath();
-	canvas.clip();
-	canvas.beginPath();
+	canvas.clipRect(0, 0, this.w, this.h);
 
 	return this;
 }
@@ -26292,7 +26272,7 @@ UIScrollViewX.prototype.isChildVisible = function(canvas, child) {
 		return false;
 	}
 	
-	if(this.showOutside) {
+	if(this.showOutside && this.isInDesignMode()) {
 		return true;
 	}
 
@@ -26314,7 +26294,6 @@ UIScrollViewX.prototype.paintChildren = function(canvas) {
 	var n = children.length;
 
 	canvas.save();
-	
 	canvas.translate(-l, -t);
 	for(var i = 0; i < n; i++) {
 		var iter = this.children[i];
@@ -26324,13 +26303,11 @@ UIScrollViewX.prototype.paintChildren = function(canvas) {
 			this.afterPaintChild(iter, canvas);
 		}
 	}
-	
 	canvas.restore();
+	this.drawScrollBar(canvas);
 	
 	return;
 }
-
-UIScrollViewX.prototype.afterPaintChildren = function(canvas) {};
 
 UIScrollViewX.prototype.dispatchPointerDownToChildren = function(p) {
 	if(!this.hitTestResult && !this.showOutside) {
@@ -26374,12 +26351,11 @@ UIScrollViewX.prototype.drawBgImageScroll = function(canvas, display, image, rec
 			var dy = Math.floor(this.yOffset/rect.h) * rect.h - this.yOffset
 			var dw = Math.ceil((this.w - dx)/rect.w) * rect.w;
 			var dh = Math.ceil((this.h - dy)/rect.h) * rect.h;
-			canvas.beginPath();
-			canvas.rect(0, 0, this.w, this.h);
-			canvas.clip();
-			canvas.beginPath();
-
+			
+			canvas.save();
+			canvas.clipRect(0, 0, this.w, this.h);
 			WImage.draw(canvas, image, display, dx, dy, dw, dh, rect);
+			canvas.restore();
 			break;
 		}
 		default:break;
@@ -26415,6 +26391,111 @@ UIScrollViewX.prototype.drawBgImage = function(canvas) {
 	else {
 		UIElement.prototype.drawBgImage.call(this, canvas);
 	}
+}
+
+UIScrollViewX.prototype.drawVScrollBar = function(canvas) {
+	var x = 0;
+	var y = 0;
+	var w = 0;
+	var h = 0;
+	var rect = null;
+	var image = null;
+	
+	var bg = this.getImageByType(UIElement.IMAGE_V_SCROLL_BAR_BG);
+	var image = bg ? bg.getImage() : null;
+	if(image) {
+		rect = bg.getImageRect();
+		w = rect.rw || rect.w;
+		x = this.w - w;
+		y = 0;
+		h = this.h;
+
+		this.drawImageAt(canvas, image, UIElement.IMAGE_DISPLAY_3PATCH_V, x, y, w, h);
+	}
+
+	var fg = this.getImageByType(UIElement.IMAGE_V_SCROLL_BAR_FG);
+	var image = fg ? fg.getImage() : null;
+	if(image) {
+		rect = fg.getImageRect();
+		w = rect.rw || rect.w;
+		x = this.w - w;
+		y = this.h * (this.yOffset/this.virtualHeight);
+		h = this.h * (this.h/this.virtualHeight);
+		if(y < 0) {
+			h = Math.max(10, h + y);
+			y = 0;
+		}
+
+		if((y + h) > this.h) {
+			h = Math.max(10, this.h - y);
+			y = this.h - h;
+		}
+
+		this.drawImageAt(canvas, image, UIElement.IMAGE_DISPLAY_3PATCH_V, x, y, w, h);
+	}
+
+	return;
+}
+
+UIScrollViewX.prototype.drawHScrollBar = function(canvas) {
+	var x = 0;
+	var y = 0;
+	var w = 0;
+	var h = 0;
+	var rect = null;
+	var image = null;
+	
+	var bg = this.getImageByType(UIElement.IMAGE_H_SCROLL_BAR_BG);
+	var image = bg ? bg.getImage() : null;
+	if(image) {
+		rect = bg.getImageRect();
+		x = 0;
+		w = this.w;
+		h = rect.rh || rect.h;
+		y = this.h - h;
+
+		this.drawImageAt(canvas, image, UIElement.IMAGE_DISPLAY_3PATCH_H, x, y, w, h);
+	}
+
+	var fg = this.getImageByType(UIElement.IMAGE_H_SCROLL_BAR_FG);
+	var image = fg ? fg.getImage() : null;
+	if(image) {
+		rect = fg.getImageRect();
+		h = rect.rh || rect.h;
+		y = this.h - h;
+		x = this.w * (this.xOffset/this.virtualWidth);
+		w = this.w * (this.w/this.virtualWidth);
+		if(x < 0) {
+			w = Math.max(10, w + x);
+			x = 0;
+		}
+
+		if((x + w) > this.w) {
+			w = Math.max(10, this.w - x);
+			x = this.w - w;
+		}
+
+		this.drawImageAt(canvas, image, UIElement.IMAGE_DISPLAY_3PATCH_H, x, y, w, h);
+	}
+}
+
+UIScrollViewX.prototype.drawScrollBar = function(canvas) {
+	if(this.scrollBarOpacity < 0.0001) {
+		return this;
+	}
+	
+	canvas.save();
+	canvas.globalAlpha = this.scrollBarOpacity;
+	if(this.w < this.virtualWidth) {
+		this.drawHScrollBar(canvas);
+	}
+	
+	if(this.h < this.virtualHeight) {
+		this.drawVScrollBar(canvas);
+	}
+	canvas.restore();
+
+	return this;
 }
 
 ShapeFactoryGet().addShapeCreator(new UIScrollViewXCreator());
@@ -26548,16 +26629,20 @@ UIGridViewX.prototype.relayoutChildren = function(animHint) {
 	var iws = iw + spacer;
 	var ihs = ih + spacer;
 
+	var vi = 0;
 	for(var i = 0; i < n; i++) {
 		var iter = arr[i];
-		
+		if(!iter.visible) {
+			continue;
+		}
+
 		if(this.isVertical) {
-			c = i%cols;
-			r = Math.floor(i/cols);
+			c = vi%cols;
+			r = Math.floor(vi/cols);
 		}
 		else {
-			r = i%rows;
-			c = Math.floor(i/rows);
+			r = vi%rows;
+			c = Math.floor(vi/rows);
 		}
 		iter.left = c * iws;
 		iter.top = r * ihs;
@@ -26565,6 +26650,8 @@ UIGridViewX.prototype.relayoutChildren = function(animHint) {
 		iter.h = ih;
 		iter.setUserMovable(false);
 		iter.setUserResizable(false);
+
+		vi++;
 	}
 
 	if(this.isVertical) {
@@ -26581,8 +26668,14 @@ UIGridViewX.prototype.relayoutChildren = function(animHint) {
 			this.vw += iws;
 		}
 	}
-
-	return;
+    if(this.xOffset + this.w > this.vw) {
+        this.xOffset = this.vw - this.w;
+    }
+    if(this.yOffset + this.h > this.vh) {
+        this.yOffset = this.vh - this.h;
+    }
+	
+    return;
 }
 
 UIGridViewX.prototype.isChildVisibleRecursive = function(child) {
@@ -26616,6 +26709,190 @@ function UIGridViewXCreator(border) {
 }
 
 ShapeFactoryGet().addShapeCreator(new UIGridViewXCreator());
+
+/*
+ * File:   ui-list-view-x.js
+ * Author: Li XianJing <xianjimli@hotmail.com>
+ * Brief:  ListView
+ * 
+ * Copyright (c) 2015 - 2016 Holaverse Inc.
+ * 
+ */
+
+/**
+ * @class UIListViewX
+ * @extends UIScrollViewX
+ * 列表视图，可以水平滚动，也可以垂直滚动。
+ *
+ * 垂直的列表视图和只有一列垂直的网格视图相似，只是列表视图的单项itemSize为0时，里面的子控件可以具有不同的高度。
+ * 水平的列表视图和只有一行水平的网格视图相似，只是列表视图的单项itemSize为0时，里面的子控件可以具有不同的宽度。
+ * 
+ * 设计时按住Alt可以拖动可视区，调节子控件的zIndex可以设置子控件的顺序。
+ *
+ */
+function UIListViewX() {
+	return;
+}
+
+UIListViewX.prototype = new UIScrollViewX();
+UIListViewX.prototype.isUILayout = true;
+UIListViewX.prototype.isUIListViewX = true;
+UIListViewX.prototype.saveProps = UIScrollViewX.prototype.saveProps.concat(["cols","rows","isVertical", "itemSize"]);
+
+UIListViewX.prototype.initUIListViewX = function(type) {
+	this.initUIScrollViewX(type);	
+
+	this.itemSize = 100;
+	this.setMargin(0, 0);
+	this.setDefSize(200, 200);
+
+	return this;
+}
+
+/**
+ * @method setVertical
+ * 设置网格视图的滚动方向。
+ * @param {Boolean} value true表示垂直滚动，false表示水平滚动。
+ * @return {UIElement} 返回控件本身。
+ *
+ */
+UIListViewX.prototype.setVertical = function(value) {
+	this.isVertical = value;
+	this.relayoutChildren();
+
+	return this;
+}
+
+/**
+ * @method getVertical
+ * 获取网格视图的滚动方向。
+ * @return {Boolean} 滚动方向。true表示垂直滚动，false表示水平滚动。
+ *
+ */
+UIListViewX.prototype.getVertical = function() {
+	return this.isVertical;
+}
+
+/**
+ * @method setItemSize
+ * 设置子控件的大小。
+ *
+ * 列表视图为垂直方向时，指单项的高度，0表示使用子控件原来的高度，否则使用指定的高度。
+ *
+ * 列表视图为水平方向时，指单项的宽度，0表示使用子控件原来的宽度，否则使用指定的宽度。
+ *
+ * @param {Number} value 设置子控件的大小。
+ * @return {UIElement} 返回控件本身。
+ *
+ */
+UIListViewX.prototype.setItemSize = function(value) {
+	this.itemSize = value;
+	this.relayoutChildren();
+
+	return this;
+}
+
+/**
+ * @method getItemSize
+ * 
+ * @return {UIElement} 返回单项的高度(垂直)或宽度(水平)。
+ *
+ */
+UIListViewX.prototype.getItemSize = function() {
+	return this.itemSize;
+}
+
+UIListViewX.prototype.shapeCanBeChild = UIGroup.prototype.shapeCanBeChild;
+UIListViewX.prototype.relayoutChildren = function(animHint) {
+	if(this.disableRelayout) {
+		return;
+	}
+
+	var arr = this.children;
+	var n = arr.length;
+	var spacer = this.spacer || 0;
+	var itemSize = this.itemSize;
+	var x = 0;
+	var y = 0;
+	var w = this.w;
+	var h = this.h;
+
+	for(var i = 0; i < n; i++) {
+		var iter = arr[i];
+		if(!iter.visible) {
+			continue;
+		}
+
+		if(this.isVertical) {
+			iter.left = 0;
+			iter.w = w;
+			iter.h = itemSize || iter.h;
+			iter.y = y;
+			y += iter.h + spacer;
+		}
+		else {
+			iter.top = 0;
+			iter.h = h;
+			iter.w = itemSize || iter.w;
+			iter.x = x;
+			x += iter.w + spacer;
+		}
+		iter.setUserMovable(false);
+		iter.setUserResizable(false);
+	}
+
+	if(this.isVertical) {
+		this.vw = this.w;
+		this.vh = y;
+		if(this.isInDesignMode()) {
+			this.vh += itemSize || 80;
+		}
+	}
+	else {
+		this.vh = this.h;
+		this.vw = x;
+		if(this.isInDesignMode()) {
+			this.vw += itemSize || 80;
+		}
+	}
+
+	this.xOffset = 0;
+	this.yOffset = 0;
+
+	return;
+}
+
+UIListViewX.prototype.isChildVisibleRecursive = function(child) {
+	return false;
+}
+
+UIListViewX.prototype.isDraggable = function() {
+	if(this.isInDesignMode()) {
+		if(this.hitTestResult !== Shape.HIT_TEST_MM) {
+			return false;
+		}
+
+		var target = this.getTarget();
+		return !target || !target.getTarget() || this.view.isAltDown();
+	}
+	else {
+		return true;
+	}
+}
+
+function UIListViewXCreator(border) {
+	var args = ["ui-list-view-x", "ui-list-view-x", null, 1];
+	
+	ShapeCreator.apply(this, args);
+	this.createShape = function(createReason) {
+		var g = new UIListViewX();
+		return g.initUIListViewX(this.type);
+	}
+	
+	return;
+}
+
+ShapeFactoryGet().addShapeCreator(new UIListViewXCreator());
 
 /*
  * File:   ui-shortcut.js
@@ -27403,7 +27680,7 @@ ShapeFactoryGet().addShapeCreator(new UIListCreator(5, 114, null));
 /**
  * @class UIListView
  * @extends UIList
- * 列表视图。和UIList一样，只是可以滚动。
+ * 列表视图。和UIList一样，只是可以滚动。建议使用UIListViewX。
  *
  */
 function UIListView() {
@@ -28208,7 +28485,7 @@ UISelect.prototype.initUISelect = function(type, w, h) {
 	this.setDefSize(w, h);
 	this.isVertical = true;
 	this.addEventNames(["onChanged"]);
-	this.setTextType(Shape.TEXT_TEXTAREA);
+	this.setTextType(UIElement.TEXT_TEXTAREA);
 	this.setCanRectSelectable(false, true);
 	this.setImage(UIElement.IMAGE_DEFAULT, null);
 	this.images.display = UIElement.IMAGE_DISPLAY_9PATCH;
@@ -28397,9 +28674,7 @@ UISelect.prototype.onPointerUpRunning = function(point, beforeChild) {
 UISelect.prototype.shapeCanBeChild = function(shape) {
 	return false;
 }
-
-UISelect.prototype.setText =function(text) {
-	text = this.toText(text);
+UISelect.prototype.createOptionsFromText = function(text) {
 	if(text) {
 		this.options = text.split("\n");
 		this.options.remove("");
@@ -28407,11 +28682,44 @@ UISelect.prototype.setText =function(text) {
 	else {
 		this.options = [];
 	}
+}
 
-	this.text = text;
+
+UISelect.prototype.setText =function(text) {
+	text = this.toText(text);
+    this.createOptionsFromText(text);
+	this._text = text;
 
 	return this;
 }
+
+/**
+ * @method setOptions
+ * 设置控件的可选项。
+ * @param {Array} options 可选项(字符串数组)。
+ * @return {UIElement} 返回控件本身。
+ *
+ *     @example small frame
+ *     var selector = this.win.find("select");
+ *     selector.setOptions(["one", "two", "three"]);
+ *
+ */
+UISelect.prototype.setOptions =function(options) {
+	this.options = options || [];
+	this.text = this.options.join("\n");
+
+	return this;
+}
+
+/**
+ * @method getOptions
+ * 获取可选项。
+ * @return {Array} 返回可选项(字符串数组)。
+ */
+UISelect.prototype.getOptions = function() {
+	return this.options;
+}
+
 
 UISelect.prototype.drawText = function(canvas) {
 	return;
@@ -28422,9 +28730,7 @@ UISelect.prototype.drawImage = function(canvas) {
 	var h = this.h;
 	var itemSize = this.getItemSize();
 
-	canvas.beginPath();
-	canvas.rect(0, 0, w, h);
-	canvas.clip();
+	canvas.clipRect(0, 0, w, h);
 	this.drawBgImage(canvas);
 
 	var n = this.options.length;
@@ -28546,6 +28852,17 @@ UISelect.prototype.setValue = function(value, notify, animate) {
 	return this;
 }
 
+Object.defineProperty(UISelect.prototype, "text", {
+    set: function(txt) {
+        txt = this.toText(txt);
+        this.createOptionsFromText(txt);
+        this._text = txt;
+    },
+    get: function() {
+        return this._text;
+    }
+});
+
 function UISelectCreator(w, h) {
 	var args = ["ui-select", "ui-select", null, 1];
 	
@@ -28621,6 +28938,13 @@ UIImage.prototype.initUIImage = function(type, w, h, bg) {
 	this.setImage("option_image_14", null);
 	this.setCanRectSelectable(false, true);
 	this.addEventNames(["onUpdateTransform"]);
+
+	this.scaleX = 1;
+	this.scaleY = 1;
+	this.drawText = null;
+	this.beforePaint = null;
+	this.afterPaint = null;
+	this.highlightConfig = null;
 
 	return this;
 }
@@ -28712,6 +29036,33 @@ UIImage.prototype.setClickedStyle = function(type, param) {
 	return;
 }
 
+UIImage.prototype.getBgImage = function() {
+	return this.images.default_bg;
+}
+
+UIImage.prototype.drawTextTips = function(canvas) {
+}
+
+UIImage.prototype.paintSelfFast = function(canvas) {
+	var opacity = this.opacity;
+	var px = this.w * this.pivotX;
+	var py = this.h * this.pivotY;
+	
+	canvas.save();
+	if(opacity !== 1) {
+		canvas.globalAlpha *=  opacity;
+	}
+
+	canvas.translate(this._left, this._top);
+	canvas.translate(px, py);
+	canvas.scale(this.scaleX, this.scaleY);
+	canvas.rotate(this.rotation);
+	canvas.translate(-px, -py);
+
+	this.drawBgImage(canvas);
+	canvas.restore();
+}
+
 /*
  * File:   ui-label.js
  * Author: Li XianJing <xianjimli@hotmail.com>
@@ -28741,7 +29092,7 @@ function UILabel() {
 UILabel.prototype = new UIElement();
 UILabel.prototype.isUILabel = true;
 
-UILabel.prototype.saveProps = ["hTextAlign", "vTextAlign"];
+UILabel.prototype.saveProps = ["hTextAlign", "vTextAlign", "singleLineMode"];
 
 UILabel.prototype.initUILabel = function(type) {
 	this.initUIElement(type);	
@@ -28820,6 +29171,43 @@ UILabel.prototype.drawText = function(canvas) {
 	return;
 }
 
+UILabel.prototype.layoutText = function(canvas) {
+	RShape.prototype.layoutText.call(this, canvas);
+	
+	if(this.singleLineMode && this.lines.length > 1) {
+		this.lines.length = 1;
+	}
+
+	return this;
+}
+
+/**
+ * @method setSingleLineMode
+ * 设置文本为单行模式。
+ * @param {Boolean} value true表示单行模式，false表示多行模式。
+ * @return {UIElement} 返回控件本身。
+ */
+UILabel.prototype.setSingleLineMode = function(value) {
+	this.singleLineMode = value;
+	this.setTextNeedRelayout(true);
+
+	return this;
+}
+
+/**
+ * @method getSingleLineMode
+ * 设置文本是否为单行模式。
+ * @return {Boolean} true表示单行模式，false表示多行模式。
+ */
+UILabel.prototype.getSingleLineMode = function() {
+	return this.singleLineMode;
+}
+
+/**
+ * @method fitToTextContent
+ * 让控件自动适应文本的高度。
+ * @return {UIElement} 返回控件本身。
+ */
 UILabel.prototype.fitToTextContent = function() {
 	if(!this.text) {
 		this.w = 30;
@@ -29131,16 +29519,15 @@ UIMenu.ARC_LAYOUT = 1;
 UIMenu.VLINEAR_LAYOUT = 2;
 UIMenu.HLINEAR_LAYOUT = 3;
 
-UIMenu.prototype = new UITips();
+UIMenu.prototype = new UIElement();
 UIMenu.prototype.isUIMenu = true;
 
 UIMenu.prototype.saveProps = ["autoHideWhenClicked", "childrenAnimation", "enableShowAnimation", "enableHideAnimation", "spacer", "menuItemNr", "animDuration", "layoutType", "originPoint"];
 UIMenu.prototype.initUIMenu = function(type) {
-	this.initUITips(type, null);
+	this.initUIElement(type, null);
 
 	this.spacer = 2;
 	this.menuItemNr = 2;
-	this.roundRadius = 5;
 	this.animDuration = 600;
 	this.setTextType(Shape.TEXT_NONE);
 	this.layoutType = UIMenu.FREE_LAYOUT;
@@ -29260,16 +29647,6 @@ UIMenu.prototype.relayoutChildren = function() {
 			}
 			break;
 		}
-	}
-
-	return;
-}
-
-UIMenu.prototype.paintSelfOnly =function(canvas) {
-	var image = this.getHtmlImageByType(UIElement.IMAGE_DEFAULT);
-
-	if(!image) {
-		this.paintSelfOnlyByColor(canvas);
 	}
 
 	return;
@@ -30411,7 +30788,7 @@ ShapeFactoryGet().addShapeCreator(new UIGridCreator());
 /**
  * @class UIGridView
  * @extends UIGrid
- * UIGridView和UIGrid类似，只是它可以垂直滚动。
+ * UIGridView和UIGrid类似，只是它可以垂直滚动。建议使用UIGridViewX。
  *
  */
 function UIGridView() {
@@ -31513,12 +31890,16 @@ UIFrames.prototype.afterChildRemoved = function(shape) {
 }
 
 UIFrames.prototype.findChildByPoint = function(point, recursive) {
-	var p = this.translatePoint(point);
+	var p = point;
 	var curFrame = this.getCurrentFrame();
 
 	if(curFrame) {
-		return curFrame.findChildByPoint(p, recursive);	
-	}
+		var ret = curFrame.findChildByPoint(p, recursive);	
+	    if(ret === curFrame && !curFrame.hitTest(p)) {
+            return this;
+        }
+        return ret;
+    }
 
 	return this;
 }
@@ -33037,6 +33418,16 @@ UIElement.prototype.callOnDoubleClickHandler = function(point) {
 	if(UIElement.eventsStoped.doubleClick) {
 		return false;
 	}
+	
+	if(this.hasEventListener("doubleclick")) {
+		var event = this.createEvent("doubleclick");
+		event.point = point;
+
+		if(this.dispatchEvent(event)) {
+			UIElement.eventsStoped.doubleClick = true;
+			return true;
+		}
+	}
 
 	if(!this.handleDoubleClick) {
 		var sourceCode = this.events["onDoubleClick"];
@@ -33081,6 +33472,13 @@ UIElement.prototype.callOnLongPressHandler = function(point) {
 			}
 		}
 	}
+	
+	if(this.hasEventListener("longpress")) {
+		var event = this.createEvent("longpress");
+		event.point = point;
+
+		this.dispatchEvent(event);
+	}
 
 	if(this.handleLongPress) {
 		try {
@@ -33112,6 +33510,13 @@ UIElement.prototype.callOnPaintHandler = function(canvas2dCtx) {
 				UIElement.logError("this.handlePaint eval", e)
 			}
 		}
+	}
+	
+	if(this.hasEventListener("paint")) {
+		var event = this.createEvent("paint");
+		event.canvas2dCtx = canvas2dCtx;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handlePaint) {
@@ -33252,6 +33657,13 @@ UIElement.prototype.callOnChildDraggingHandler = function(sourceChildIndex, targ
 			}
 		}
 	}
+	
+	if(this.hasEventListener("childdragging")) {
+		var event = this.createEvent("childdragging");
+		event.sourceChildIndex = sourceChildIndex;
+		event.targetChildIndex = targetChildIndex;
+		this.dispatchEvent(event);
+	}
 
 	if(this.handleOnChildDragging) {
 		try {
@@ -33280,6 +33692,14 @@ UIElement.prototype.callOnChildDraggedHandler = function(sourceChildIndex, targe
 			}
 		}
 	}
+	
+	if(this.hasEventListener("childdragged")) {
+		var event = this.createEvent("childdragged");
+		event.sourceChildIndex = sourceChildIndex;
+		event.targetChildIndex = targetChildIndex;
+		this.dispatchEvent(event);
+	}
+
 
 	if(this.handleOnChildDragged) {
 		try {
@@ -33337,10 +33757,10 @@ UIElement.prototype.callOnChangedHandler = function(value) {
 		this.dispatchEvent(event);
 	}
 
-	if(this.onChanged) {
-		this.onChanged(value);
-
-		return;
+	if(this.hasEventListener("changed")) {
+		var event = this.createEvent("changed");
+		event.value = value;
+		this.dispatchEvent(event);
 	}
 
 	if(!this.handleOnChanged) {
@@ -33380,6 +33800,12 @@ UIElement.prototype.callOnInitHandler = function() {
 			}
 		}
 	}
+	
+	if(this.hasEventListener("init")) {
+		var event = this.createEvent("init");
+
+		this.dispatchEvent(event);
+	}
 
 	if(this.handleOnInit) {
 		try {
@@ -33415,6 +33841,12 @@ UIElement.prototype.callOnFocusInHandler = function() {
 		}
 	}
 
+	if(this.hasEventListener("focusin")) {
+		var event = this.createEvent("focusin");
+
+		this.dispatchEvent(event);
+	}
+
 	if(this.handleOnFocusIn) {
 		try {
 			this.handleOnFocusIn();
@@ -33448,6 +33880,12 @@ UIElement.prototype.callOnFocusOutHandler = function() {
 			}
 		}
 	}
+	
+	if(this.hasEventListener("focusout")) {
+		var event = this.createEvent("focusout");
+
+		this.dispatchEvent(event);
+	}
 
 	if(this.handleOnFocusOut) {
 		try {
@@ -33474,6 +33912,12 @@ UIElement.prototype.callOnUpdateDataHandler = function() {
 				UIElement.logError("this.handleOnUpdateData eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("updatedata")) {
+		var event = this.createEvent("updatedata");
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnUpdateData) {
@@ -33505,6 +33949,13 @@ UIElement.prototype.callOnGestureHandler = function(gesture) {
 			}
 		}
 	}
+	
+	if(this.hasEventListener("gesture")) {
+		var event = this.createEvent("gesture");
+		event.gesture = gesture;
+
+		this.dispatchEvent(event);
+	}
 
 	if(this.handleOnGesture) {
 		try {
@@ -33531,6 +33982,13 @@ UIElement.prototype.callOnBeforeOpenHandler = function(initData) {
 				UIElement.logError("this.handleOnBeforeOpen eval", e)
 			}
 		}
+	}
+	
+	if(this.hasEventListener("beforeopen")) {
+		var event = this.createEvent("beforeopen");
+		event.initData = initData;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnBeforeOpen) {
@@ -33623,6 +34081,11 @@ UIElement.prototype.callOnSwitchToBackHandler =function() {
 		}
 	}
 
+	if(this.hasEventListener("switchtoback")) {
+		var event = this.createEvent("switchtoback");
+		this.dispatchEvent(event);
+	}
+
 	if(this.handleOnSwitchToBack) {
 		try {
 			this.handleOnSwitchToBack();
@@ -33649,6 +34112,11 @@ UIElement.prototype.callOnSwitchToFrontHandler = function() {
 		}
 	}
 
+	if(this.hasEventListener("switchtofront")) {
+		var event = this.createEvent("switchtofront");
+		this.dispatchEvent(event);
+	}
+
 	if(this.handleOnSwitchToFront) {
 		try {
 			this.handleOnSwitchToFront();
@@ -33673,6 +34141,11 @@ UIElement.prototype.callOnLoadHandler =function() {
 				UIElement.logError("this.handleOnLoad eval", e)
 			}
 		}
+	}
+	
+	if(this.hasEventListener("load")) {
+		var event = this.createEvent("load");
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnLoad) {
@@ -33701,6 +34174,11 @@ UIElement.prototype.callOnUnloadHandler =function() {
 		}
 	}
 
+	if(this.hasEventListener("unload")) {
+		var event = this.createEvent("unload");
+		this.dispatchEvent(event);
+	}
+
 	if(this.handleOnUnload) {
 		try {
 			this.handleOnUnload();
@@ -33719,13 +34197,14 @@ UIElement.prototype.callOnMovedHandler = function() {
  	if(this.cameraFollowMe) {
 		this.getWindow().cameraFollow(this);
 	} 
-	if(this.handleOnMoved) {
-		this.handleOnMoved();
-	    
-        return;
-    }
+	
+	if(this.hasEventListener("moved")) {
+		var event = this.createEvent("moved");
 
-   	if(!this.events || !this.events["onMoved"]) return;
+		this.dispatchEvent(event);
+	}
+
+   	if(!this.events) return;
 	if(!this.handleOnMoved) {
 		var sourceCode = this.events["onMoved"];
 		if(sourceCode) {
@@ -33738,12 +34217,6 @@ UIElement.prototype.callOnMovedHandler = function() {
 		}
 	}
 	
-	if(this.hasEventListener("moved")) {
-		var event = this.createEvent("moved");
-
-		this.dispatchEvent(event);
-	}
-
 	if(this.handleOnMoved) {
 		try {
 			this.handleOnMoved();
@@ -33756,7 +34229,8 @@ UIElement.prototype.callOnMovedHandler = function() {
 }
 
 UIElement.prototype.callOnPreSolveHandler = function(body, contact, oldManifold) {
-	if(!this.events || !this.events["onPreSolve"]) return;
+	if(!this.events) return;
+
 	if(!this.handleOnPreSolve) {
 		var sourceCode = this.events["onPreSolve"];
 		if(sourceCode) {
@@ -33767,6 +34241,15 @@ UIElement.prototype.callOnPreSolveHandler = function(body, contact, oldManifold)
 				UIElement.logError("this.handleOnPreSolve eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("presolve")) {
+		var event = this.createEvent("presolve");
+		event.body = body;
+		event.contact = contact;
+		event.oldManifold = oldManifold;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnPreSolve) {
@@ -33781,7 +34264,8 @@ UIElement.prototype.callOnPreSolveHandler = function(body, contact, oldManifold)
 }
 
 UIElement.prototype.callOnPostSolveHandler = function(body, contact, impulse) {
-	if(!this.events || !this.events["onPostSolve"]) return;
+	if(!this.events) return;
+
 	if(!this.handleOnPostSolve) {
 		var sourceCode = this.events["onPostSolve"];
 		if(sourceCode) {
@@ -33792,6 +34276,15 @@ UIElement.prototype.callOnPostSolveHandler = function(body, contact, impulse) {
 				UIElement.logError("this.handleOnPostSolve eval", e)
 			}
 		}
+	}
+	
+	if(this.hasEventListener("postsolve")) {
+		var event = this.createEvent("postsolve");
+		event.body = body;
+		event.contact = contact;
+		event.impulse = impulse;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnPostSolve) {
@@ -33806,12 +34299,8 @@ UIElement.prototype.callOnPostSolveHandler = function(body, contact, impulse) {
 }
 
 UIElement.prototype.callOnBeginContactHandler = function(body, contact) {
-	if(this.onBeginContact) {
-		this.onBeginContact(body, contact);
+	if(!this.events) return;
 
-		return;
-	}
-	
 	if(this.hasEventListener("begincontact")) {
 		var event = this.createEvent("begincontact");
 		event.body = body;
@@ -33820,7 +34309,6 @@ UIElement.prototype.callOnBeginContactHandler = function(body, contact) {
 		this.dispatchEvent(event);
 	}
 
-	if(!this.events || !this.events["onBeginContact"]) return;
 	if(!this.handleOnBeginContact) {
 		var sourceCode = this.events["onBeginContact"];
 		if(sourceCode) {
@@ -33845,12 +34333,8 @@ UIElement.prototype.callOnBeginContactHandler = function(body, contact) {
 }
 
 UIElement.prototype.callOnEndContactHandler = function(body, contact) {
-	if(this.onEndContact) {
-		this.onEndContact(body, contact);
+	if(!this.events) return;
 
-		return;
-	}
-	
 	if(this.hasEventListener("endcontact")) {
 		var event = this.createEvent("endcontact");
 		event.body = body;
@@ -33859,7 +34343,6 @@ UIElement.prototype.callOnEndContactHandler = function(body, contact) {
 		this.dispatchEvent(event);
 	}
 
-	if(!this.events || !this.events["onEndContact"]) return;
 	if(!this.handleOnEndContact) {
 		var sourceCode = this.events["onEndContact"];
 		if(sourceCode) {
@@ -33885,6 +34368,7 @@ UIElement.prototype.callOnEndContactHandler = function(body, contact) {
 
 UIElement.prototype.callOnAnimateDoneHandler = function(name) {
 	if(!this.events) return;
+
 	if(!this.handleOnAnimateDone) {
 		var sourceCode = this.events["onAnimateDone"];
 		if(sourceCode) {
@@ -33895,6 +34379,13 @@ UIElement.prototype.callOnAnimateDoneHandler = function(name) {
 				UIElement.logError("this.handleOnAnimateDone eval", e)
 			}
 		}
+	}
+	
+	if(this.hasEventListener("animatedone")) {
+		var event = this.createEvent("animatedone");
+		event.name = name;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnAnimateDone) {
@@ -33911,6 +34402,7 @@ UIElement.prototype.callOnAnimateDoneHandler = function(name) {
 
 UIElement.prototype.callOnSwipeLeftHandler = function(start, end) {
 	if(!this.events) return;
+
 	if(!this.handleOnSwipeLeft) {
 		var sourceCode = this.events["onSwipeLeft"];
 		if(sourceCode) {
@@ -33921,6 +34413,14 @@ UIElement.prototype.callOnSwipeLeftHandler = function(start, end) {
 				UIElement.logError("this.handleOnSwipeLeft eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("swipeleft")) {
+		var event = this.createEvent("swipeleft");
+		event.start = start;
+		event.end = end;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnSwipeLeft) {
@@ -33936,6 +34436,7 @@ UIElement.prototype.callOnSwipeLeftHandler = function(start, end) {
 
 UIElement.prototype.callOnSwipeRightHandler = function(start, end) {
 	if(!this.events) return;
+
 	if(!this.handleOnSwipeRight) {
 		var sourceCode = this.events["onSwipeRight"];
 		if(sourceCode) {
@@ -33946,6 +34447,14 @@ UIElement.prototype.callOnSwipeRightHandler = function(start, end) {
 				UIElement.logError("this.handleOnSwipeRight eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("swiperight")) {
+		var event = this.createEvent("swiperight");
+		event.start = start;
+		event.end = end;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnSwipeRight) {
@@ -33961,6 +34470,7 @@ UIElement.prototype.callOnSwipeRightHandler = function(start, end) {
 
 UIElement.prototype.callOnSwipeUpHandler = function(start, end) {
 	if(!this.events) return;
+
 	if(!this.handleOnSwipeUp) {
 		var sourceCode = this.events["onSwipeUp"];
 		if(sourceCode) {
@@ -33971,6 +34481,14 @@ UIElement.prototype.callOnSwipeUpHandler = function(start, end) {
 				UIElement.logError("this.handleOnSwipeUp eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("swipeup")) {
+		var event = this.createEvent("swipeup");
+		event.start = start;
+		event.end = end;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnSwipeUp) {
@@ -33986,6 +34504,7 @@ UIElement.prototype.callOnSwipeUpHandler = function(start, end) {
 
 UIElement.prototype.callOnSwipeDownHandler = function(start, end) {
 	if(!this.events) return;
+
 	if(!this.handleOnSwipeDown) {
 		var sourceCode = this.events["onSwipeDown"];
 		if(sourceCode) {
@@ -33996,6 +34515,14 @@ UIElement.prototype.callOnSwipeDownHandler = function(start, end) {
 				UIElement.logError("this.handleOnSwipeDown eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("swipedown")) {
+		var event = this.createEvent("swipedown");
+		event.start = start;
+		event.end = end;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnSwipeDown) {
@@ -34011,6 +34538,7 @@ UIElement.prototype.callOnSwipeDownHandler = function(start, end) {
 
 UIElement.prototype.callOnBecomeZeroHandler = function() {
 	if(!this.events) return;
+
 	if(!this.handleOnBecomeZero) {
 		var sourceCode = this.events["onBecomeZero"];
 		if(sourceCode) {
@@ -34041,6 +34569,7 @@ UIElement.prototype.callOnBecomeZeroHandler = function() {
 
 UIElement.prototype.callOnBecomeFullHandler = function() {
 	if(!this.events) return;
+
 	if(!this.handleOnBecomeFull) {
 		var sourceCode = this.events["onBecomeFull"];
 		if(sourceCode) {
@@ -34087,6 +34616,12 @@ UIElement.prototype.callOnTimeoutHandler = function() {
 		var event = this.createEvent("timer");
 		this.dispatchEvent(event);
 	}
+	
+	if(this.hasEventListener("timeout")) {
+		var event = this.createEvent("timeout");
+		this.dispatchEvent(event);
+	}
+
 
 	if(this.handleOnTimeout) {
 		try {
@@ -34111,6 +34646,12 @@ UIElement.prototype.callOnSystemInitHandler = function() {
 				UIElement.logError("this.handleOnSystemInit eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("systeminit")) {
+		var event = this.createEvent("systeminit");
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnSystemInit) {
@@ -34147,6 +34688,13 @@ UIElement.prototype.callOnScrollOutOfRangeHandler = function(offset) {
 		}
 	}
 
+	if(this.hasEventListener("scrolloutofrange")) {
+		var event = this.createEvent("scrolloutofrange");
+		event.offset = offset;
+
+		this.dispatchEvent(event);
+	}
+
 	if(this.handleOnScrollOutOfRange) {
 		try {
 			this.handleOnScrollOutOfRange(offset);
@@ -34175,6 +34723,12 @@ UIElement.prototype.callOnBirthedHandler = function() {
 			}
 		}
 	}
+	
+	if(this.hasEventListener("birthed")) {
+		var event = this.createEvent("birthed");
+
+		this.dispatchEvent(event);
+	}
 
 	if(this.handleOnBirthed) {
 		try {
@@ -34199,6 +34753,16 @@ UIElement.prototype.callOnDeviceOrientation = function(x, y, z, evt) {
 				UIElement.logError("this.handleOnDeviceOrientation eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("deviceorientation")) {
+		var event = this.createEvent("deviceorientation");
+		event.x = x;
+		event.y = y;
+		event.z = z;
+		event.event = evt;
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleOnDeviceOrientation) {
@@ -34248,7 +34812,7 @@ UIElement.prototype.dispatchCustomEvent = function(eventName, args) {
 	return true;
 }
 
-UIWindow.prototype.callOnMultiTouchHandler = function(action, points, event) {
+UIWindow.prototype.callOnMultiTouchHandler = function(action, points, evt) {
 	if(!this.enable || !this.events) {
 		return false;
 	}
@@ -34268,14 +34832,19 @@ UIWindow.prototype.callOnMultiTouchHandler = function(action, points, event) {
 			}
 		}
 	}
+	
+	if(this.hasEventListener("multitouch")) {
+		var event = this.createEvent("multitouch");
+		event.action = action;
+		event.points = points;
+		event.event = evt;
 
-	if(!this.children.length) {
-		console.log("clicked: " + this.type + "(" + this.name + ")");
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleMultiTouch) {
 		try {
-			this.handleMultiTouch(action, points, event);
+			this.handleMultiTouch(action, points, evt);
 		}catch(e) {
 			UIElement.logError("this.handleMultiTouch", e)
 		}
@@ -34285,7 +34854,7 @@ UIWindow.prototype.callOnMultiTouchHandler = function(action, points, event) {
 }
 
 UIElement.prototype.callOnDragStartHandler = function() {
-	if(!this.enable || !this.events || !this.events["onDragStart"]) {
+	if(!this.enable || !this.events) {
 		return false;
 	}
 
@@ -34300,6 +34869,12 @@ UIElement.prototype.callOnDragStartHandler = function() {
 			}
 		}
 	}
+	
+	if(this.hasEventListener("dragstart")) {
+		var event = this.createEvent("dragstart");
+
+		this.dispatchEvent(event);
+	}
 
 	if(this.handleDragStart) {
 		try {
@@ -34313,7 +34888,7 @@ UIElement.prototype.callOnDragStartHandler = function() {
 }
 
 UIElement.prototype.callOnDragEndHandler = function() {
-	if(!this.enable || !this.events || !this.events["onDragEnd"]) {
+	if(!this.enable || !this.events) {
 		return false;
 	}
 
@@ -34329,6 +34904,12 @@ UIElement.prototype.callOnDragEndHandler = function() {
 		}
 	}
 
+	if(this.hasEventListener("dragend")) {
+		var event = this.createEvent("dragend");
+
+		this.dispatchEvent(event);
+	}
+
 	if(this.handleDragEnd) {
 		try {
 			this.handleDragEnd();
@@ -34341,7 +34922,7 @@ UIElement.prototype.callOnDragEndHandler = function() {
 }
 
 UIElement.prototype.callOnDraggingHandler = function() {
-	if(!this.enable || !this.events || !this.events["onDragging"]) {
+	if(!this.enable || !this.events) {
 		return false;
 	}
 
@@ -34355,6 +34936,12 @@ UIElement.prototype.callOnDraggingHandler = function() {
 				UIElement.logError("this.handleDragging eval", e)
 			}
 		}
+	}
+
+	if(this.hasEventListener("dragging")) {
+		var event = this.createEvent("dragging");
+
+		this.dispatchEvent(event);
 	}
 
 	if(this.handleDragging) {
@@ -35270,13 +35857,7 @@ UIButton.prototype.initUIButton = function(type, w, h) {
 	return this;
 }
 
-UIButton.prototype.shapeCanBeChild = function(shape) {
-	if(shape.isUILabel || shape.isUIImage || shape.isUIBitmapFontText) {
-		return true;
-	}
-
-	return false;
-}
+UIButton.prototype.shapeCanBeChild = UIGroup.prototype.shapeCanBeChild;
 
 UIButton.prototype.paintSelfOnly =function(canvas) {
 	if(this.pointerDown) {
@@ -35318,7 +35899,7 @@ ShapeFactoryGet().addShapeCreator(new UIButtonCreator(120, 60));
 /**
  * @class UIMLEdit
  * @extends UIElement
- * 单行编辑器。
+ * 多行编辑器。
  */
 
 /**
@@ -35365,6 +35946,10 @@ UIMLEdit.prototype.drawText = function(canvas) {
 		return;
 	}
 
+	if(this.textNeedRelayout) {
+		this.layoutText(canvas);	
+	}
+
 	return this.defaultDrawText(canvas);
 }
 
@@ -35384,7 +35969,7 @@ UIMLEdit.prototype.onClick = function(point, beforeChild) {
 		this.editText();
 	}
 
-	return;
+    return this.callOnClickHandler(point);
 }
 
 UIMLEdit.prototype.isFocused = function() {
@@ -35393,24 +35978,17 @@ UIMLEdit.prototype.isFocused = function() {
 
 UIMLEdit.prototype.getEditorRect = function() {
 	var p = this.getPositionInView();
+	var cp = CantkRT.getMainCanvasPosition();
 	var vp = this.view.getAbsPosition();
 	var scale = this.view.getViewScale();
-	var ox = vp.x;
-	var oy = vp.y;
 
-	var x = (p.x) * scale + ox;
-	var y = (p.y) * scale + oy;
-	var w = this.getWidth() * scale;
-	var h = this.getHeight() * scale;
+	var canvasScale = UIElement.getMainCanvasScale();
+	var x = (vp.x + p.x * scale)/canvasScale.x + cp.x;
+	var y = (vp.y + p.y * scale)/canvasScale.y + cp.y;
+	var w = (this.getWidth() * scale)/canvasScale.x;
+	var h = (this.getHeight() * scale)/canvasScale.y;
 	
-	var rect = {};
-
-	scale = UIElement.getMainCanvasScale();
-	rect.x = Math.round(x/scale.x);
-	rect.y = Math.round(y/scale.y);
-	rect.w = Math.round(w/scale.x);
-	rect.h = Math.round(h/scale.y);
-	
+	var rect = {x:x, y:y, w:w, h:h};
 	if(this.isInDesignMode()) {
 		var radtio = window.devicePixelRatio || 1;
 		rect.x *= radtio;
@@ -35434,7 +36012,8 @@ UIMLEdit.prototype.editText = function(point) {
 		shape.editing = true;
 		editor.setTextColor(this.style.textColor);
 		editor.showBorder(this.isInDesignMode());
-		function onChanged(text) {
+	    editor.show();	
+        function onChanged(text) {
 			if(text !== shape.text) {
 				shape.setText(text, true);
 				shape.postRedraw();
@@ -36350,120 +36929,18 @@ function UIViewPager() {
 UIViewPager.prototype = new UIPageManager();
 UIViewPager.prototype.isUIViewPager = true;
 
-UIViewPager.prototype.saveProps = ["slideToChange", "showIndicator"];
+UIViewPager.prototype.saveProps = ["slideToChange"];
 UIViewPager.prototype.initUIViewPager = function(type) {
 	this.initUIPageManager(type);	
 
 	this.current = 0;
 	this.setDefSize(200, 200);
-	this.setTextType(Shape.TEXT_NONE);
-	this.widthAttr = UIElement.WIDTH_FILL_PARENT;
-	this.heightAttr = UIElement.HEIGHT_FILL_PARENT;
+	this.setTextType(UIElement.TEXT_NONE);
 	this.velocityTracker = new VelocityTracker();
+	this.interpolator =  new DecelerateInterpolator(2);
+    this.animateQueue = [];
 
 	return this;
-}
-
-UIViewPager.prototype.getFrameIndicatorParams = function() {
-	var n = this.children.length;
-	var itemSize = Math.min((0.5 * this.w)/n, 40);
-	var indicatorWidth = itemSize * n;
-
-	var dx = (this.w - indicatorWidth)/2;
-	var dy = 0.8 * this.h;
-
-	return {offsetX:dx, offsetY:dy, itemSize:itemSize, n:n};
-}
-
-UIViewPager.prototype.onClick = function(point, beforeChild) {
-	if(beforeChild || this.animating) {
-		return;
-	}
-
-	if(!this.needShowIndicator()) {
-		return;
-	}
-
-	var params = this.getFrameIndicatorParams();
-
-	var x = point.x;
-	var y = point.y;
-	var n = params.n;
-	var dx = params.offsetX;
-	var dy = params.offsetY;
-	var itemSize = params.itemSize;
-
-	if(y < dy || y > (dy + itemSize) || x < dx || x > (dx + n * itemSize)) {
-		return;
-	}
-
-	for(var i = 0; i < n; i++) {
-		if(x > dx && x < (dx + itemSize)) {
-			this.setCurrent(i);	
-			break;
-		}
-
-		dx += itemSize;
-	}
-
-	return;
-}
-
-UIViewPager.prototype.drawFrameIndicator = function(canvas, currFrame) {
-	var params = this.getFrameIndicatorParams();
-
-	var n = params.n;
-	var dx = params.offsetX;
-	var dy = params.offsetY;
-	var itemSize = params.itemSize;
-
-	dx += itemSize/2;
-	dy += itemSize/2;
-
-	var r = 15;
-	canvas.fillStyle = this.style.fillColor;
-	for(var i = 0; i < n; i++) {
-		canvas.beginPath();
-		canvas.arc(dx, dy, r, 0, Math.PI * 2);
-		dx += itemSize;
-	
-		if(i === currFrame) {
-			canvas.save();
-			canvas.shadowColor = this.style.lineColor;
-			canvas.shadowBlur = 5;
-			canvas.shadowOffsetX = 0;
-			canvas.shadowOffsetY = 0;
-
-			canvas.fill();
-			canvas.stroke();
-			canvas.restore();
-		}
-		else {
-			canvas.fill();
-		}
-	}
-
-	return;
-}
-
-UIViewPager.prototype.needShowIndicator = function() {
-	if(this.pageIndicator) {
-		return false;
-	}
-
-	if(this.isInDesignMode() || this.showIndicator) {
-		return true;
-	}
-
-	return false;
-}
-
-UIViewPager.prototype.afterPaintChildren = function(canvas) {
-	if(this.needShowIndicator()) {
-		this.drawFrameIndicator(canvas, this.current);
-	}
-
-	return;
 }
 
 UIViewPager.prototype.getPrevFrame = function() {
@@ -36485,8 +36962,8 @@ UIViewPager.prototype.animScrollTo = function(range, newFrame) {
 	var duration = 1000;
 	var slideview = this;
 	var startOffset = this.offset;
-	var startTime = (new Date()).getTime();
-	var interpolator = new DecelerateInterpolator(2);
+	var startTime = Date.now();
+	var interpolator = this.interpolator;
 
 	if(slideview.animating) {
 		return;
@@ -36494,23 +36971,27 @@ UIViewPager.prototype.animScrollTo = function(range, newFrame) {
 
 	slideview.animating = true;
 	function animStep() {
-		var now = new Date();
-		var timePercent = (now.getTime() - startTime)/duration;
+		var now = Date.now();
+		var timePercent = (now - startTime)/duration;
 		var percent = interpolator.get(timePercent);
 		
-		if(timePercent < 1) {
+		if(timePercent < 1 && !slideview.halt) {
 			slideview.offset = startOffset + range * percent;
-			setTimeout(animStep, 10);
+			setTimeout(animStep, 16);
 		}
 		else {
 			slideview.offset = 0;
 			slideview.setCurrent(newFrame);
+			slideview.setAnimatingFrames(null, null);
+
 			delete startTime;
 			delete interpolator;
 			delete slideview.animating;
+            delete slideview.halt;
+            
+            slideview.queueAnimation();
 		}
 
-		delete now;
 		slideview.postRedraw();
 	}
 
@@ -36535,13 +37016,16 @@ UIViewPager.prototype.onPointerDownRunning = function(point, beforeChild) {
 }
 
 UIViewPager.prototype.isEventHandledByChild = function() {
-	var status = UIElement.lastEvent.status;
-	return status & UIElement.EVENT_HSCROLL_HANDLED;
+	if(UIElement.hScrollHandledBy && UIElement.hScrollHandledBy !== this) {
+		return true;
+	}else{
+		return false;
+	}
 }
 
 UIViewPager.prototype.setEventHandled = function() {
-	this.setLastEventStatus(UIElement.EVENT_HSCROLL_HANDLED);
-	
+	UIElement.hScrollHandledBy = this;
+
 	return this;
 }
 
@@ -36549,10 +37033,12 @@ UIViewPager.prototype.onPointerMoveRunning = function(point, beforeChild) {
 	if(!this.slideToChange || beforeChild || !this.pointerDown) {
 		return;
 	}
+
 	if(this.animating) {
 		this.setEventHandled();
 		return;
 	}
+
 	if(this.isEventHandledByChild()) {
 		return;
 	}
@@ -36572,9 +37058,11 @@ UIViewPager.prototype.onPointerMoveRunning = function(point, beforeChild) {
 	
 	if(dx > dy && dx > 10) {
 		this.offset = this.getMoveAbsDeltaX();
+		this.setAnimatingFrames(this.getPrevFrame(), this.getNextFrame());
 	}
 	else {
 		this.offset = 0;
+		this.setAnimatingFrames(null, null);
 	}
 
 	this.addMovementForVelocityTracker();
@@ -36639,14 +37127,69 @@ UIViewPager.prototype.onPointerUpRunning = function(point, beforeChild) {
 	return;
 }
 
+UIViewPager.prototype.setAnimatingFrames = function(leftFrame, rightFrame) {
+	this.leftFrame = leftFrame;
+	this.rightFrame = rightFrame;
+
+	return this;
+}
+
+/**
+ * @method switchTo 
+ * 设置当前显示的子控件。
+ * @param {Number} index 子控件的索引，与setCurrent不同是，switchTo有切换动画。
+ * @return {UIElement} 返回控件本身。
+ *
+ */
+UIViewPager.prototype.switchTo = function(index) {
+	var arr = this.children;
+	var n = arr.length;
+	
+	this.offset = 0;
+    if(index < 0 || index > n - 1) {
+        return;
+    }
+    
+    if(this.animateQueue === undefined) {
+        this.animateQueue = [];
+    } 
+    this.animateQueue.push(index);
+    
+    if(this.animating) {
+        console.log("busy...");
+        this.halt = true;
+        return;
+    }
+   
+    this.queueAnimation();
+
+	return this;
+}
+
+UIViewPager.prototype.queueAnimation = function() {
+    if(this.animateQueue.length < 1) {
+        return;
+    }
+	var arr = this.children;
+    var index = this.animateQueue.pop();
+    this.animateQueue = [];
+    var newFrame = arr[index];
+    if(index < this.current) {
+        this.animScrollTo(this.w, index);
+        this.setAnimatingFrames(newFrame, null);
+    }else{
+        this.animScrollTo(-this.w, index);
+        this.setAnimatingFrames(null, newFrame);
+    }
+}
+
 UIViewPager.prototype.paintChildrenAnimating = function(canvas) {
 	var currFrame = this.getCurrentFrame();
-	var prevFrame = this.getPrevFrame();
-	var nextFrame = this.getNextFrame();
+	var prevFrame = this.leftFrame;
+	var nextFrame = this.rightFrame;
 
 	canvas.save();
-	canvas.rect(0, 0, this.w, this.h);
-	canvas.clip();
+	canvas.clipRect(0, 0, this.w, this.h);
 
 	if(this.offset > 0) {
 		var offsetX = this.w-this.offset;
@@ -36662,9 +37205,16 @@ UIViewPager.prototype.paintChildrenAnimating = function(canvas) {
 		nextFrame.x = this.w + this.offset;
 		nextFrame.paintSelf(canvas);
 	}
-	currFrame.x = 0;
-	nextFrame.x = 0;
-	prevFrame.x = 0;
+	if(currFrame) {
+		currFrame.x = 0;
+	}
+	if(nextFrame) {
+		nextFrame.x = 0;
+	}
+	if(prevFrame) {
+		prevFrame.x = 0;
+	}
+
 	canvas.restore();
 
 	return;
@@ -36684,7 +37234,7 @@ UIViewPager.prototype.paintChildrenNormal = function(canvas) {
 }
 
 UIViewPager.prototype.paintChildren = function(canvas) {
-	if(this.offset && this.children.length > 1) {
+	if(this.offset && this.children.length > 1 && (this.leftFrame || this.rightFrame)) {
 		this.paintChildrenAnimating(canvas);
 	}
 	else {
@@ -36696,18 +37246,6 @@ UIViewPager.prototype.paintChildren = function(canvas) {
 
 UIViewPager.prototype.setSlideToChange = function(value) {
 	this.slideToChange = value;
-
-	return;
-}
-
-UIViewPager.prototype.setShowIndicator = function(value) {
-	this.showIndicator = value;
-
-	return;
-}
-
-UIViewPager.prototype.onModeChanged = function() {
-	this.setCurrent(0);
 
 	return;
 }
@@ -36735,6 +37273,13 @@ ShapeFactoryGet().addShapeCreator(new UIViewPagerCreator());
  * Copyright (c) 2011 - 2015  Li XianJing <xianjimli@hotmail.com>
  * Copyright (c) 2015 - 2016 Holaverse Inc.
  * 
+ */
+
+/**
+ * @class UISlider
+ * @extends UIProgressBar 
+ * 新版本中UISlider已经被弃用，API参见UIProgressBar
+ *
  */
 
 /**
@@ -36829,12 +37374,12 @@ UIProgressBar.prototype.relayoutChildren = function() {
 	}
 
 	if(this.w > this.h) {
-		var x = this.value * this.w - (this.dragger.w>>1);	
+		var x = this.value * (this.w - this.dragger.w);	
 		var maxX = this.w - this.dragger.w;
 		this.dragger.setLeft(Math.max(0, Math.min(maxX, x)));
 	}
 	else {
-		var y = (1-this.value) * this.h - (this.dragger.h >> 1);
+		var y = (1-this.value) * (this.h - this.dragger.h);
 		var maxY = this.h - this.dragger.h;
 		this.dragger.setTop(Math.max(0, Math.min(maxY, y)))
 	}
@@ -36936,6 +37481,12 @@ UIProgressBar.prototype.getMaxValue = function() {
 	return this.maxValue;
 }
 
+UIProgressBar.prototype.afterChildRemoved = function(shape) {
+    if(shape === this.dragger) {
+        this.dragger = null;
+    }
+}
+
 UIProgressBar.prototype.afterChildAppended =function(shape) {
 	var bar = this;
 	
@@ -36992,7 +37543,7 @@ UIProgressBar.prototype.afterChildAppended =function(shape) {
 	shape.onMoved = function() {
 		var percent = 0;
 		if(bar.w > bar.h) {
-			var value = (this.left + (this.w >> 1))/bar.w;
+			var value = this.left/(bar.w - this.w);
 			percent = value * 100;
 			if(this.left <= 0) {
 				percent = 0;
@@ -37002,7 +37553,7 @@ UIProgressBar.prototype.afterChildAppended =function(shape) {
 			}
 		}
 		else {
-			var value = (bar.h - (this.top + (this.h >> 1)))/bar.h;
+			var value = (bar.h - this.h - this.top)/(bar.h - this.h);
 			percent = value * 100;
 			if(this.top <= 0) {
 				percent = 100;
@@ -37037,12 +37588,12 @@ UIProgressBar.prototype.fixPercent = function(percent, stepSize) {
 		fixedPercent = (value/range) * 100;
 	}
 
-	return fixedPercent;
+	return Math.min(fixedPercent, 100)/100;
 }
 
 UIProgressBar.prototype.setPercentOnly = function(percent, notify, animation) {
 	var stepSize = this.stepSize;
-	var newValue = (this.fixPercent(percent, this.stepSize)%101)/100;
+	var newValue = this.fixPercent(percent, this.stepSize);
 	
 	if(!animation) {
 		this.value = newValue;
@@ -37125,10 +37676,11 @@ UIProgressBar.prototype.getValue = function() {
 	var stepSize = this.stepSize;
 
 	if(stepSize) {
-		value = Math.round((value/stepSize)) * stepSize;
+		var fv = Math.floor((value/stepSize)) * stepSize;
+        value = Math.max(value, fv);
 	}
 
-	return Math.round(value);
+	return Math.min(this.maxValue, Math.round(value));
 }
 
 UIProgressBar.prototype.setValue = function(value, notify, animation) {
@@ -37409,7 +37961,14 @@ UIWindowManager.prototype.initUIWindowManager = function(type) {
 	this.soundMusicAutoPlay = true;
 	this.setSoundEffectsEnable(true);
 
+	this.loadedAssets = {};
+	UIWindowManager.instance = this;
+
 	return this;
+}
+
+UIWindowManager.getInstance = function() {
+	return UIWindowManager.instance;
 }
 
 UIWindowManager.prototype.fromJson = function(json) {
@@ -37486,14 +38045,47 @@ UIWindowManager.prototype.clearAssetsCache = function(check) {
 	return this;
 }
 
-UIWindowManager.prototype.loadAssets = function(winList, onProgress) {
+UIWindowManager.prototype.loadAssets = function(winList, onLoadProgress, onDownloadProgress) {
+	var me = this;
+	winList = winList || this.getWindowNames();
+
+	if(AssetsDownloader.isAvailable()) {
+		AssetsDownloader.downloadMulti(winList, onDownloadProgress, function() {
+			me.doLoadAssets(winList, onLoadProgress);
+		});
+	}
+	else {
+		me.doLoadAssets(winList, onLoadProgress);
+	}
+
+	return this;
+}
+
+UIWindowManager.prototype.shouldShowAssetsLoadingProgress = function(name) {
+	return !this.isAssetsLoaded(name) && this.assetsLoadingWin;
+}
+
+UIWindowManager.prototype.isAssetsLoaded = function(name) {
+	return this.loadedAssets[name];
+}
+
+UIWindowManager.prototype.doLoadAssets = function(winList, onProgress) {
+	var queue = [];
+	var wm = this;
+
 	function onAssetsLoadProgress(event) {
 		if(onProgress) {
 			onProgress(event.percent, event.finished, event.total);
 		}
 
 		if(event.finished >= event.total) {
-			ResLoader.removeEventListener(ResLoader.EVENT_ASSETS_LOAD_PROGRESS, onAssetsLoadProgress);
+			ResLoader.off(ResLoader.EVENT_ASSETS_LOAD_PROGRESS, onAssetsLoadProgress);
+	
+			for(var k = 0; k < queue.length; k++) {
+				var iter = queue[k];
+				wm.loadedAssets[iter] = true;
+			}
+			queue = null;
 		}
 	}
 
@@ -37501,20 +38093,18 @@ UIWindowManager.prototype.loadAssets = function(winList, onProgress) {
 	for(var i = 0; i < children.length; i++) {
 		var win = children[i];
 		if(!winList || winList.indexOf(win.name) >= 0) {
+			queue.push(win.name);
 			this.loadElementAssets(win);	
-			//console.log("loadElementAssets:" + win.name);
 		}
 	}
 
-	if(onProgress) {
-		if(ResLoader.isLoadCompleted()) {
-			setTimeout(function() {
-				onProgress(100, 1, 1);
-			}, 10);
-		}
-		else {
-			ResLoader.addEventListener(ResLoader.EVENT_ASSETS_LOAD_PROGRESS, onAssetsLoadProgress);
-		}
+	if(ResLoader.isLoadCompleted()) {
+		setTimeout(function() {
+			onAssetsLoadProgress({percent:100, finished:100, total:100});
+		}, 10);
+	}
+	else {
+		ResLoader.on(ResLoader.EVENT_ASSETS_LOAD_PROGRESS, onAssetsLoadProgress);
 	}
 
 	return this;
@@ -37588,29 +38178,31 @@ UIWindowManager.prototype.setInitWindow = function(initWindowIndex) {
 UIWindowManager.prototype.getInitWindow = function() {
 	var initWin = null;
 
-	if(this.children.length > 1) {
-		if(this.initWindowIndex || this.initWindowIndex === 0) {
-			initWin = this.children[this.initWindowIndex];	
-		}
+    if(this.initWindowIndex || this.initWindowIndex === 0) {
+        initWin = this.children[this.initWindowIndex];	
+    }
 
-		if(!initWin) {
-			var initWinName = cantkGetQueryParam("initwin");
-			if(initWinName) {	
-				initWin = this.find(initWinName);
-			}
-		}
+    if(!initWin) {
+        var initWinName = cantkGetQueryParam("initwin");
+        if(initWinName) {	
+            initWin = this.find(initWinName);
+        }
+    }
 
-		if(!initWin) {
-			var initWinName = this.preferInitWindow;
-			if(initWinName) {	
-				initWin = this.find(initWinName);
-			}
-		}
+    if(!initWin) {
+        var initWinName = this.preferInitWindow;
+        if(initWinName) {	
+            initWin = this.find(initWinName);
+        }
+    }
 
-		if(!initWin) {
-			initWin = this.getMainWindow();
-		}
-	}
+    if(!initWin) {
+        initWin = this.getMainWindow();
+    }
+
+    if(!initWin || initWin.isUILoadingWindow) {
+        return null;
+    }
 
 	return initWin;
 }
@@ -37689,7 +38281,7 @@ UIWindowManager.prototype.onResLoadDone = function() {
 	return;
 }
 
-UIWindowManager.prototype.getResLoadingWindow = function() {
+UIWindowManager.prototype.getStartLoadingWindow = function() {
 	var windows = this.children;
 	var n = windows.length;
 
@@ -37704,16 +38296,41 @@ UIWindowManager.prototype.getResLoadingWindow = function() {
 	return null;
 }
 
-UIWindowManager.prototype.showResLoadingWindow = function() {
-	this.resLoadDone = false;
+UIWindowManager.prototype.loadAudios = function() {
 	this.loadSoundEffects();
 	this.loadSoundMusic();
 
-	var resWin = this.getResLoadingWindow();
+	return this;
+}
+
+UIWindowManager.prototype.loadFonts = function() {
+	var meta = this.view.getMeta();
+	if(meta && meta.extfonts) {
+		ResLoader.loadFonts(meta.extfonts);
+	}
+
+	return this;
+}
+
+UIWindowManager.prototype.setAssetsLoadingWindow = function(name) {
+	this.assetsLoadingWin = this.find(name);
+
+	return this;
+}
+
+UIWindowManager.prototype.getAssetsLoadingWindow = function() {
+	return this.assetsLoadingWin;
+}
+
+UIWindowManager.prototype.showStartLoadingWindow = function() {
+	this.resLoadDone = false;
+	var resWin = this.getStartLoadingWindow();
 
 	if(resWin) {
 		if(!resWin.isUILoadingWindowV2) {
 			this.loadAssets(null, null);
+            this.loadAudios();
+    		this.loadFonts();
 			console.log("old version, load all assets.");
 		}
 
@@ -37729,6 +38346,9 @@ UIWindowManager.prototype.showResLoadingWindow = function() {
 }
 
 UIWindowManager.prototype.systemInit = function() {
+	UIWindowManager.soundEffects = {};
+	UIWindowManager.soundMusic = {};
+	
 	UIElement.animTimerID = null;
 	this.callOnSystemInitHandler();
 
@@ -37738,7 +38358,7 @@ UIWindowManager.prototype.systemInit = function() {
 	}
 
 	var me = this;
-	this.showResLoadingWindow();
+	this.showStartLoadingWindow();
 	ResLoader.setOnLoadFinishListener(function() {
 		me.callOnLoad();
 	});
@@ -37762,6 +38382,20 @@ UIWindowManager.prototype.systemExit = function() {
 	return;
 }
 
+UIWindowManager.prototype.hasOpenPendingWindow = function() {
+   	var children = this.children;
+	var n = children.length;
+
+	for(var i = 0; i < n; i++) {
+		var win = children[i];
+		if(win.openPending) {
+            return true;
+        }
+	}
+
+    return false;
+}
+
 UIWindowManager.prototype.openWindow = function(name, onClose, closeCurrent, initData, options) {
 	var newWin = null;
 	if(name) {
@@ -37776,6 +38410,11 @@ UIWindowManager.prototype.openWindow = function(name, onClose, closeCurrent, ini
 		return;
 	}
 	
+    if(newWin.openPending) {
+		console.log("This window is already open:" + name);
+		return;
+	}
+
 	if(closeCurrent) {
 		this.closeCurrentWindow(0, true);
 	}
@@ -37800,12 +38439,22 @@ UIWindowManager.prototype.openWindow = function(name, onClose, closeCurrent, ini
 		}
 	}
 
+    /*
 	if(newWin.openPending) {
 		newWin.openPending = false;
 		console.log("This window is already open:" + name);
 		return false;
 	}
+    */
 	
+	if(!newWin.isUILoadingWindow && !newWin.isUILoadingWindowV2 && this.shouldShowAssetsLoadingProgress(newWin.name)) {
+		this.downloadAssetsAndOpenWindow(newWin, initData, onClose);
+	}else{
+		this.doOpenWindow(newWin, initData, onClose);
+	}
+}
+
+UIWindowManager.prototype.doOpenWindow = function(newWin, initData, onClose) {
 	newWin.prepareForOpen();
 	newWin.openPending = true;
 	newWin.initData = initData;
@@ -37814,13 +38463,70 @@ UIWindowManager.prototype.openWindow = function(name, onClose, closeCurrent, ini
 
 	this.targetShape = newWin;
 	this.setPointerEventTarget(newWin);
-
 	if(newWin.isUINormalWindow) {
 		return this.openNormalWindow(newWin);
 	}
 	else {
 		return this.openPopupWindow(newWin);
 	}
+}
+
+
+UIWindowManager.prototype.downloadAssetsAndOpenWindow = function(newWin, initData, onClose) {
+	var loadingWin = this.getAssetsLoadingWindow(); 
+	if(loadingWin === newWin) {
+		console.log("UIWindowManager.prototype.downloadAssetsAndOpenWindow failed.");
+		return;
+	}
+
+	this.doOpenWindow(loadingWin);
+
+	var wm = this;
+	var bar = loadingWin.findChildByType("ui-progressbar");
+	var label = loadingWin.findChildByType("ui-label");
+	
+	if(bar) {
+		bar.setPercent(0);
+	}
+
+	if(label) {
+		label.setText("Downloading...");
+	}
+
+	function onLoadProgress(percent, loadedNr, totalNr) {
+		if(label) {
+			label.setText("Loading...");
+		}
+
+		if(bar) {
+			bar.setPercent(percent, true);
+		}
+		
+		if(loadedNr >= totalNr) {
+			wm.closeCurrentWindow(0, true);
+			wm.doOpenWindow(newWin, initData, onClose);
+		}
+	}
+	
+	function onDownloadProgress(percent, loadedNr, totalNr) {
+		if(label) {
+			if(percent >= 100) {
+				label.setText("Loading...");
+			}else{
+				label.setText("Downloading...");
+			}
+		}
+
+		if(bar) {
+			if(percent >= 100) {
+				bar.setPercent(0, true);
+			}else {
+				bar.setPercent(percent, true);
+			}
+		}
+	}
+	
+	this.loadAssets([newWin.name], onLoadProgress, onDownloadProgress);
 }
 
 UIWindowManager.prototype.openPopupWindow = function(newWin ) {
@@ -37832,6 +38538,10 @@ UIWindowManager.prototype.openPopupWindow = function(newWin ) {
 			console.log("may be exited preview mode");
 			return;
 		}
+        var index = wm.getFrameIndex(curWin);
+        if(wm.history.indexOf(index) < 0) {
+            return;
+        }
 		newWin.show();
 		curWin.setPopupWindow(newWin);
 		wm.postRedraw();
@@ -37843,9 +38553,9 @@ UIWindowManager.prototype.openPopupWindow = function(newWin ) {
 		if(newWin.isAnimationEnabled()) {
 			var p = this.getPositionInScreen();
 			var animation = AnimationFactory.create(newWin.getAnimationName(true), newWin.getAnimationDuration(true)); 
-			var backendCanvas = UIFrames.preparseBackendCanvas(curWin, newWin);
+            animation.setWins(curWin, newWin);
 			animation.setScale(this.getRealScale());
-			animation.prepare(p.x, p.y, this.w, this.h, backendCanvas, openPopupWindow);
+			animation.prepare(p.x, p.y, this.w, this.h, openPopupWindow);
 			animation.setRectOfFront(newWin.x, newWin.y, newWin.w, newWin.h);
 			animation.run();
 		}
@@ -37883,9 +38593,9 @@ UIWindowManager.prototype.openNormalWindow = function(newWin) {
 		if(newWin.isAnimationEnabled()) {
 			var p = this.getPositionInScreen();
 			var animation = AnimationFactory.create(newWin.getAnimationName(true), newWin.getAnimationDuration(true)); 
-			var backendCanvas = UIFrames.preparseBackendCanvas(curWin, newWin);
+            animation.setWins(curWin, newWin);
 			animation.setScale(this.getRealScale());
-			animation.prepare(p.x, p.y, this.w, this.h, backendCanvas, closeAndOpenWindow);
+			animation.prepare(p.x, p.y, this.w, this.h, closeAndOpenWindow);
 			animation.run();
 		}
 		else {
@@ -37941,9 +38651,9 @@ UIWindowManager.prototype.backToHomeWin = function() {
 	if(curWin.isAnimationEnabled()) {
 		var p = this.getPositionInScreen();
 		var animation = AnimationFactory.create(curWin.getAnimationName(false), curWin.getAnimationDuration(false)); 
-		var backendCanvas = UIFrames.preparseBackendCanvas(lastWin, curWin);
+        animation.setWins(curWin, lastWin);
 		animation.setScale(this.getRealScale());
-		animation.prepare(p.x, p.y, this.w, this.h, backendCanvas, function() {});
+		animation.prepare(p.x, p.y, this.w, this.h, function() {});
 		animation.run();
 	}
 
@@ -37960,16 +38670,21 @@ UIWindowManager.prototype.closeCurrentWindow = function(retInfo, syncClose) {
 	if(!curWin || curWin.isInDesignMode()) {
 		return  false;
 	}
-	
-	if(curWin.isUINormalWindow) {
-		return this.closeCurrentNormalWindow(curWin, retInfo, syncClose);
+
+	return this.closeWindow(curWin, retInfo, syncClose);
+}
+
+UIWindowManager.prototype.closeWindow = function(win, retInfo, syncClose) {
+    win.closePending = true;
+	if(win.isUINormalWindow) {
+		return this.closeNormalWindow(win, retInfo, syncClose);
 	} 
 	else {
-		return this.closeCurrentPopupWindow(curWin, retInfo, syncClose);
+		return this.closePopupWindow(win, retInfo, syncClose);
 	}
 }
 
-UIWindowManager.prototype.closeCurrentPopupWindow = function(popupWin, retInfo, syncClose) {
+UIWindowManager.prototype.closePopupWindow = function(popupWin, retInfo, syncClose) {
 	var wm = this;
 	var curWin = this.getCurrentFrame();
 
@@ -37986,19 +38701,30 @@ UIWindowManager.prototype.closeCurrentPopupWindow = function(popupWin, retInfo, 
 			popupWin.callOnClose(retInfo);
 		}
 
+        if(!popupWin.isTopWindow()) {
+            console.log("close background dialog");
+            if(popupWin.parentWindow) {
+                popupWin.parentWindow.removePopupWindow(popupWin);
+            }
+            popupWin.callOnClose(retInfo); 
+            
+            return;
+        }
+
 		if(curWin === popupWin) {
 			syncClose = true;
 		}
-		if(popupWin.isAnimationEnabled() && !syncClose) {
+
+		if(popupWin.isAnimationEnabled() && !syncClose && !wm.hasOpenPendingWindow()) {
 			var p = this.getPositionInScreen();
 			var animation = AnimationFactory.create(popupWin.getAnimationName(false), popupWin.getAnimationDuration(false)); 
 
 			curWin.removePopupWindow(popupWin);
-			var backendCanvas = UIFrames.preparseBackendCanvas(curWin, popupWin);
+            animation.setWins(popupWin, curWin);
 			curWin.setPopupWindow(popupWin);
 		
 			animation.setScale(this.getRealScale());
-			animation.prepare(p.x, p.y, this.w, this.h, backendCanvas, closePopupWindow);
+			animation.prepare(p.x, p.y, this.w, this.h, closePopupWindow);
 			animation.setRectOfFront(popupWin.x, popupWin.y, popupWin.w, popupWin.h);
 			animation.run();
 		}
@@ -38023,9 +38749,8 @@ UIWindowManager.prototype.closeAll = function() {
 
 	for(var i = wins.length-1; i >= 0; i--) {
 		var win = wins[i];
-		win.popupWindow = null;
-		win.targetShape = null;
 		win.callOnClose({});
+		win.targetShape = null;
 	}
 
 	this.history = [];
@@ -38033,7 +38758,7 @@ UIWindowManager.prototype.closeAll = function() {
 	return;
 }
 
-UIWindowManager.prototype.closeCurrentNormalWindow = function(curWin, retInfo, syncClose) {
+UIWindowManager.prototype.closeNormalWindow = function(curWin, retInfo, syncClose) {
 	var wm = this;
 	var lastWin = null;
 
@@ -38046,6 +38771,18 @@ UIWindowManager.prototype.closeCurrentNormalWindow = function(curWin, retInfo, s
 		return false;
 	}
 
+    if(!curWin.isTopWindow()) {
+        var curIndex = wm.getFrameIndex(curWin);
+        console.log("closing background window " + curWin.name);
+        wm.history.remove(curIndex);
+        curWin.callOnClose();
+
+        if(curIndex === wm.current && wm.history.length > 0) {
+            wm.showFrame(wm.history[wm.history.length - 1]);
+        }
+        return;
+    }
+
 	lastWinIndex = this.history[this.history.length-2];
 	lastWin = this.getFrame(lastWinIndex);
 
@@ -38054,6 +38791,10 @@ UIWindowManager.prototype.closeCurrentNormalWindow = function(curWin, retInfo, s
 			console.log("may be exited preview mode");
 			return;
 		}
+        if(lastWinIndex != wm.history[wm.history.length - 1] || wm.hasOpenPendingWindow()) {
+            //new win was appended and shown?
+            return;
+        }
 		wm.showFrame(lastWinIndex);
 		lastWin.callOnSwitchToFront();
 		
@@ -38067,12 +38808,12 @@ UIWindowManager.prototype.closeCurrentNormalWindow = function(curWin, retInfo, s
 	if(syncClose) {
 		showLastWindow();
 	}
-	else if(curWin.isAnimationEnabled()) {
+	else if(curWin.isAnimationEnabled() && !wm.hasOpenPendingWindow()) {
 		var p = this.getPositionInScreen();
 		var animation = AnimationFactory.create(curWin.getAnimationName(false), curWin.getAnimationDuration(false)); 
-		var backendCanvas = UIFrames.preparseBackendCanvas(lastWin, curWin);
+        animation.setWins(curWin, lastWin);
 		animation.setScale(this.getRealScale());
-		animation.prepare(p.x, p.y, this.w, this.h, backendCanvas, showLastWindow);
+		animation.prepare(p.x, p.y, this.w, this.h, showLastWindow);
 		animation.run();
 	}
 	else {
@@ -38279,32 +39020,38 @@ UIWindowManager.prototype.paintChildren = function(canvas) {
 	}
 
 	var child = this.getCurrentFrame();
-	if(child) {
-		if(child.isUIDialog) {
-			canvas.fillStyle = "white";
-			canvas.fillRect(0, 0, this.w, this.h);
-		}
+	if(child.closePending) {
+        return;
+    }
 
-		canvas.save();
-		canvas.beginPath();
-		child.paintSelf(canvas);
-		canvas.restore();
-	}
+    if(child.isUIDialog) {
+        canvas.fillStyle = "white";
+        canvas.fillRect(0, 0, this.w, this.h);
+    }
+
+    canvas.save();
+    canvas.beginPath();
+    child.paintSelf(canvas);
+    canvas.restore();
 
 	return;
 }
 
 UIWindowManager.prototype.paintSelf = function(canvas) {
-	canvas.save();
-	this.translate(canvas);
-	this.paintSelfOnly(canvas);
+	var x = this.x;
+	var y = this.y;
+	var translate = x || y;
 
-	this.beforePaintChildren(canvas);
+	if(translate) {
+		canvas.save();
+		canvas.translate(x, y);
+	}
+
 	this.paintChildren(canvas);
-	this.afterPaintChildren(canvas);
-	canvas.restore();
 
-	return;
+	if(translate) {
+		canvas.restore();
+	}
 }
 
 UIWindowManager.prototype.isDeviceDirectionOK = function() {
@@ -38428,8 +39175,6 @@ UIWindowManager.prototype.setSoundMusicsEnable = function(enable) {
 }
 
 UIWindowManager.prototype.loadSoundEffects = function() {
-	UIWindowManager.soundEffects = {};
-
 	if(!this.soundEffectURLs) {
 		return;
 	}
@@ -38709,8 +39454,6 @@ UIWindowManager.prototype.loadSoundMusicNative = function() {
 }
 
 UIWindowManager.prototype.loadSoundMusic = function() {
-	UIWindowManager.soundMusic = {};
-	
     if(!this.soundMusicURLs) {
 		return;
 	}
@@ -39684,10 +40427,6 @@ UIPageIndicator.prototype.getViewPager = function() {
 		}
 	}
 
-	if(this.viewPager) {
-		this.viewPager.setShowIndicator(false);
-	}
-
 	return this.viewPager;
 }
 
@@ -39945,6 +40684,7 @@ UIPageIndicatorSimple.prototype.isScrollable = function() {
 UIPageIndicatorSimple.prototype = new UIPageIndicator();
 UIPageIndicatorSimple.prototype.isUIPageIndicatorSimple = true;
 
+UIPageIndicatorSimple.prototype.saveProps = ["indicatorStyle"];
 UIPageIndicatorSimple.prototype.initUIPageIndicatorSimple = function(type, w, h, indicatorStyle) {
 	this.initUIPageIndicator(type, w, h);	
 	this.style.fillColorOfCurrent = "Gray";
@@ -40529,7 +41269,7 @@ ShapeFactoryGet().addShapeCreator(new UIPageIndicatorSimpleCreator());
  *
  * 注意：
  *
- * 1.文档中时长的单位为毫秒，速度单位为像素/秒，加速单位为像素/秒^2，角度单位为幅度。
+ * 1.文档中时长的单位为毫秒，速度单位为像素/秒，加速单位为像素/秒^2，角度单位为弧度。
  *
  * 2.插值算法实现加速/加速/匀速等效果，请参考插值算法。
  *
@@ -41805,52 +42545,12 @@ UIScene.prototype.getRelayoutHeight = function() {
 }
 
 UIScene.prototype.defaultPaintChildren = function(canvas) {
-	var left = this.xOffset;
-	var top = this.yOffset;
-	var right = this.xOffset + this.w;
-	var bottom = this.yOffset + this.h;
-
-	var k = 0;
 	var children = this.children;
 	var n = this.children.length;
-	var shouldDestroyShapes = [];
+
 	for(var i = 0; i < n; i++) {
 		var shape = children[i];
-		if(!shape) {
-			continue;
-		}
-
-		var skipIt = false;
-		var x = shape.left;
-		var y = shape.top;
-
-		if(!shape.rotation && shape.children && !shape.children.length) { 
-			if(x > right || y > bottom || (x + shape.w) < left || (y + shape.h) < top) {
-				skipIt = true;
-			}
-		}
-
-		if(shape.autoDestroyWhenOutside && skipIt) {
-			shouldDestroyShapes.push(shape);
-			continue;
-		}
-
-		if(!shape.visible || skipIt) {
-			if(shape.isAnimating()) {
-				shape.stepAnimation(canvas);
-			}
-			continue;
-		}
-	
 		shape.paintSelf(canvas);
-	}
-
-	this.paintTargetShape(canvas);
-
-	for(var i = 0; i < shouldDestroyShapes.length; i++) {
-		var iter = shouldDestroyShapes[i];
-		console.log("Remove " + iter.name + " autoDestroyWhenOutside=" + iter.autoDestroyWhenOutside);
-		iter.remove(true);
 	}
 
 	return;
@@ -42069,57 +42769,70 @@ UIScene.prototype.afterPaintChildren = function(canvas) {
 	return;
 }
 
+UIScene.prototype.paintFPS = function(canvas) {
+	var seconds = Math.floor(Date.now()/1000);
+	if(!this.lastSeconds) {
+		this.fps = 0;
+		this.drawCount = 0;
+		this.lastSeconds = seconds;
+	}
+	
+	this.drawCount++;
+	if(seconds > this.lastSeconds) {
+		this.fps = this.drawCount;
+
+		this.drawCount = 0;
+		this.lastSeconds = seconds;
+	}
+	
+	var h = 30;
+	var w = 60;
+	var str = this.fps; 
+
+	canvas.save();
+	canvas.beginPath();
+	canvas.rect(0, 0, w, h);
+	canvas.fillStyle = "Black";
+	canvas.fill();
+
+	canvas.textAlign = "center";
+	canvas.textBaseline = "middle";
+	canvas.font = "20px Sans";
+	canvas.fillStyle = "White";
+	canvas.fillText(str, w >> 1, h >> 1);
+	canvas.restore();
+}
+
 UIScene.prototype.paintSelf = function(canvas) {
 	this.stepAnimation(canvas);
 	UIWindow.prototype.paintSelf.call(this, canvas);
 
-	if(this.showFPS && !this.isInDesignMode()) {
-		var seconds = Math.floor(Date.now()/1000);
-		if(!this.lastSeconds) {
-			this.fps = 0;
-			this.drawCount = 0;
-			this.lastSeconds = seconds;
-		}
-		
-		this.drawCount++;
-		if(seconds > this.lastSeconds) {
-			this.fps = this.drawCount;
+    if(this.world && this.debugBox2d) {
+        this.world.DrawDebugData(); 
+    }
 
-			this.drawCount = 0;
-			this.lastSeconds = seconds;
-		}
-		
-		var h = 30;
-		var w = 60;
-		var str = this.fps; 
-
-		canvas.save();
-		canvas.beginPath();
-		canvas.rect(0, 0, w, h);
-		canvas.fillStyle = "Black";
-		canvas.fill();
-
-		canvas.textAlign = "center";
-		canvas.textBaseline = "middle";
-		canvas.font = "20px Sans";
-		canvas.fillStyle = "White";
-		canvas.fillText(str, w >> 1, h >> 1);
-		canvas.restore();
+	if(canvas.setShowFPS) {
+		canvas.setShowFPS(this.showFPS);
+	}else if(this.showFPS && !this.isInDesignMode()) {
+		this.paintFPS(canvas);
 	}
 
 	return;
 }
 
 UIScene.prototype.paintChildren = function(canvas) {
-	canvas.save();	
-	canvas.translate(-this.xOffset, -this.yOffset);
-	this.defaultPaintChildren(canvas);
-	canvas.restore();
-
-	if(this.popupWindow) {
-		this.popupWindow.paintSelf(canvas);
+	var ox = this.xOffset;
+	var oy = this.yOffset;
+	if(!ox && !oy) {
+		this.defaultPaintChildren(canvas);
 	}
-	
+	else {
+		canvas.save();	
+		canvas.translate(-ox, -oy);
+		this.defaultPaintChildren(canvas);
+		canvas.restore();
+	}
+
 	return;
 }
 
@@ -42300,13 +43013,8 @@ UIScene.prototype.afterChildRemoved = function(shape) {
 }
 
 UIScene.prototype.translatePoint = function(point) {
-	if(this.popupWindow) {
-		return point;
-	}
-	else {
-		var p = {x : (point.x - this.left + this.xOffset), y : (point.y - this.top + this.yOffset)};
-		return p;
-	}
+	var p = {x : (point.x - this.left + this.xOffset), y : (point.y - this.top + this.yOffset)};
+	return p;
 }
 
 /**
@@ -42491,6 +43199,25 @@ UIScene.prototype.prepareForOpen = function() {
 	UIWindow.prototype.prepareForOpen.call(this);
 }
 
+UIScene.prototype.isCurrent = function() {
+	var wm = this.getParent();
+	return wm && wm.getCurrentFrame() === this;
+}
+
+UIScene.prototype.onCreateRUBEBody = function(body) {
+    if(body) {
+        return Physics.createUIRubeBody(body, this.world, this);
+    }
+    return null;
+}
+
+UIScene.prototype.onRUBEJointCreated = function(joint) {
+    if(joint) {
+        return Physics.createElementForJoint(joint, this.world, this);
+    }
+    return null;
+}
+
 function UISceneCreator() {
 	var args = ["ui-scene", "ui-scene", null, 1];
 	
@@ -42542,7 +43269,11 @@ UISoundMusic.prototype.initUISoundMusic = function(type) {
 }
 
 UISoundMusic.prototype.shapeCanBeChild = function(shape) {
-	return false;
+	if(shape.isUISoundEffects || shape.isUISoundMusic) {
+		return false;
+	}
+
+	return UIGroup.prototype.shapeCanBeChild.call(this, shape);
 }
 
 
@@ -42617,7 +43348,11 @@ UISoundEffects.prototype.initUISoundEffects = function(type) {
 }
 
 UISoundEffects.prototype.shapeCanBeChild = function(shape) {
-	return false;
+	if(shape.isUISoundEffects || shape.isUISoundMusic) {
+		return false;
+	}
+
+	return UIGroup.prototype.shapeCanBeChild.call(this, shape);
 }
 
 UISoundEffects.prototype.setValue = function(value) {
@@ -42867,8 +43602,17 @@ UITimer.prototype.shapeCanBeChild = function(shape) {
 }
 
 UITimer.prototype.onInit = function() {
+	var me = this;
+	var win = this.win;
+
+	function startTimer() {
+		me.start();
+		win.off("open", startTimer);
+	}
+
 	if(this.enable) {
-		this.start();
+		win.on("open", startTimer);
+
 		console.log("start timer.");
 	}
 	else {
@@ -43502,7 +44246,7 @@ function UISkeletonAnimation() {
 UISkeletonAnimation.prototype = new UIElement();
 UISkeletonAnimation.prototype.isUISkeletonAnimation = true;
 
-UISkeletonAnimation.prototype.saveProps = ["animationName", "skinName", "animationScaleX", "animationScaleY",
+UISkeletonAnimation.prototype.saveProps = ["enableCache", "animationName", "skinName", "animationScaleX", "animationScaleY",
 "textureJsonURL", "skeletonJsonURL", "textureURL"];
 
 UISkeletonAnimation.prototype.urlProps = ["textureJsonURL", "skeletonJsonURL", "textureURL"];
@@ -43537,6 +44281,12 @@ UISkeletonAnimation.prototype.initUISkeletonAnimation = function(type, w, h) {
  */
 UISkeletonAnimation.prototype.play = function(animationName, repeatTimes, onDone, onOneCycle, useFadeIn, duration) {
 	var me = this;
+
+    if(me.loadDataDone !== true) {
+        this.initPlayArgs = [].slice.call(arguments);
+        return;
+    }
+
 	var deferred = Deferred();
 	this.resume();
 	this.doPlay(animationName, repeatTimes, function() {
@@ -43554,32 +44304,65 @@ UISkeletonAnimation.prototype.play = function(animationName, repeatTimes, onDone
 };
 
 
+/**
+ * @method setSkeletonJsonURL
+ * 设置骨骼动画的JSON URL。需要调用reload才能生效。
+ * @param {String} skeletonJsonURL 骨骼动画的JSON URL。
+ * @return {UIElement} 返回控件本身。
+ */
 UISkeletonAnimation.prototype.setSkeletonJsonURL = function(skeletonJsonURL) {
 	this.skeletonJsonURL = skeletonJsonURL;
 
 	return this;
 }
 
+/**
+ * @method getSkeletonJsonURL
+ * 获取骨骼动画的JSON URL。
+ * @return {String} 返回骨骼动画的JSON URL。
+ */
 UISkeletonAnimation.prototype.getSkeletonJsonURL = function() {
 	return this.skeletonJsonURL ? this.skeletonJsonURL : "";
 }
 
+/**
+ * @method setTextureJsonURL
+ * 设置骨骼动画的纹理集的JSON/ATLAS URL。需要调用reload才能生效。
+ * @param {String} textureJsonURL 骨骼动画的纹理集的JSON/ATLAS URL。
+ * @return {UIElement} 返回控件本身。
+ */
 UISkeletonAnimation.prototype.setTextureJsonURL = function(textureJsonURL) {
 	this.textureJsonURL = textureJsonURL;
 
 	return this;
 }
 
+/**
+ * @method getTextureJsonURL
+ * 获取骨骼动画的纹理集的JSON/ATLAS URL。
+ * @return {String} 返回骨骼动画的纹理集的JSON/ATLAS URL。
+ */
 UISkeletonAnimation.prototype.getTextureJsonURL = function() {
 	return this.textureJsonURL ? this.textureJsonURL : "";
 }
 
+/**
+ * @method setTextureURL
+ * 设置骨骼动画的纹理图片的URL。需要调用reload才能生效。
+ * @param {String} textureURL 骨骼动画的纹理图片的URL。
+ * @return {UIElement} 返回控件本身。
+ */
 UISkeletonAnimation.prototype.setTextureURL = function(textureURL) {
 	this.textureURL = textureURL;
 
 	return this;
 }
 
+/**
+ * @method getTextureURL
+ * 获取骨骼动画的纹理图片的URL。
+ * @return {String} 返回骨骼动画的纹理图片的URL。
+ */
 UISkeletonAnimation.prototype.getTextureURL = function() {
 	return this.textureURL ? this.textureURL : "";
 }
@@ -43624,13 +44407,21 @@ UISkeletonAnimation.prototype.createSkelentonAnimation = function(onDone) {
 		if(me.skinName) {
 			me.setSkin(me.skinName);
 		}
-		me.play(animationName);
+        me.loadDataDone = true;
+        if(me.initPlayArgs) {
+            me.play.apply(me, me.initPlayArgs);
+            me.initPlayArgs = null;
+        }
+        else {
+		    me.play(animationName);
+        }
 		me.callOnLoadDoneHandler();
 		if(onDone) {
 			onDone();
 		}
 	}
 
+    me.loadDataDone = false;
 	this.loadSheletonData(this.textureJsonURL, this.skeletonJsonURL, this.textureURL, onDataLoad);
 
 	return;
@@ -43666,12 +44457,26 @@ UISkeletonAnimation.prototype.onInit = function() {
 	return;
 }
 
+/**
+ * @method reload
+ * 修改骨骼动画的URL后，需要调用本函数重新载入新的数据。
+ * @return {UIElement} 返回控件本身。
+ *
+ *     @example small frame
+ *     var dragonbones = this.win.dragonbones;
+ *     var assets = this.win.assets;
+ *
+ *     dragonbones.setSkeletonJsonURL(assets.getAssetURL("Robot.json"));
+ *     dragonbones.setTextureJsonURL(assets.getAssetURL("texture.json"));
+ *     dragonbones.setTextureURL(assets.getAssetURL("texture.png"));
+ *     dragonbones.reload();
+ */
 UISkeletonAnimation.prototype.reload = function(onDone) {
 	if(this.textureURL && this.textureJsonURL && this.skeletonJsonURL) {
 		this.createSkelentonAnimation(onDone);
 	}
 
-	return;
+	return this;
 }
 
 UISkeletonAnimation.prototype.destroy = function() {
@@ -43886,10 +44691,20 @@ UIBitmapFontText.prototype.initUIBitmapFontText = function(type, w, h) {
 	this.setDefSize(w, h);
 	this.setSizeLimit(10, 10);
 	this.setTextType(Shape.TEXT_NONE);
-	this.setImage(UIElement.IMAGE_NORMAL, null);
 	this.addEventNames(["onUpdateTransform"]); 
+	this.setImage(UIElement.IMAGE_NORMAL_FG, null);
+	this.setImage("option_image_0", null);
+	this.setImage("option_image_1", null);
+	this.setImage("option_image_2", null);
+	this.setImage("option_image_3", null);
+	this.setImage("option_image_4", null);
+	this.setImage("option_image_5", null);
 
 	return this;
+}
+
+UIBitmapFontText.prototype.getDefaultImageType = function() {
+	return UIElement.IMAGE_NORMAL_FG;
 }
 
 UIBitmapFontText.prototype.shapeCanBeChild = function(shape) {
@@ -43982,7 +44797,7 @@ UIBitmapFontText.prototype.drawFgImage = function(canvas) {
 
 	var image = wImage.getImage();
 	var imageRect = wImage.getImageRect();
-	if(!image) {
+	if(!image || !imageRect.h || !imageRect.w) {
 		return;
 	}
 
@@ -44162,13 +44977,13 @@ UIBitmapFontTextX.prototype.setDataURL = function(dataURL) {
 	this.dataURL = dataURL;
 
 	if(dataURL) {
-		if(dataURL.endWith(".fnt")) {
+		if(dataURL.indexOf(".fnt") > 0) {
 			ResLoader.loadData(dataURL, function(data) {	
 				this.parseFont(data, dataURL);
 			}.bind(this));
 		}
-		else if(dataURL.endWith(".json")) {
-			ResLoader.loadJson(dataURL, function(data) {	
+		else if(dataURL.indexOf(".json") > 0) {
+			ResLoader.loadJson(dataURL, function(data) {
 				this.parseJson(data, dataURL);
 			}.bind(this));
 		}
@@ -44278,7 +45093,7 @@ UIBitmapFontTextX.prototype.drawText = function(canvas) {
 			var rect = charDesc;
 			var img = charDesc.image.getImage();
 
-			if(img) {
+			if(img && img.height > 0 && img.width > 0) {
 				x = ox + (rect.ox || 0);
 				y = baseY + (rect.oy || 0);
 
@@ -45219,7 +46034,7 @@ UIAssets.prototype.loadAll = function(onProgress) {
 	function onDone() {
 		finished++;
 		if(onProgress) {
-			onProgress(100*(finished/total)/total, finished, total);
+			onProgress(100*(finished/total), finished, total);
 		}
 	}
 
@@ -45260,9 +46075,9 @@ ShapeFactoryGet().addShapeCreator(new UIAssetsCreator());
  * File:   ui-tile.js
  * Author: Li XianJing <xianjimli@hotmail.com>
  * Brief:  tile shape
- * 
+ *
  * Copyright (c) 2015 - 2015  Holaverse Inc.
- * 
+ *
  */
 
 
@@ -45291,7 +46106,7 @@ UITile.prototype.isUITile = true;
 
 UITile.prototype.saveProps = ["dataURL"];
 UITile.prototype.initUITile = function(type, w, h) {
-	this.initUIElement(type);	
+	this.initUIElement(type);
 	this.setSize(w, h);
 
 	return this;
@@ -45317,7 +46132,7 @@ UITile.Layer.prototype.drawOrthogonal = function(canvas, rect) {
 	var tile = this.tile;
 	var tileW = tile.tileWidth;
 	var tileH = tile.tileHeight;
-	
+
 	var w = tileW * cols;
 	var top = Math.max(Math.floor(rect.y/tileH), 0);
 	var left = Math.max(Math.floor(rect.x/tileW), 0);
@@ -45390,6 +46205,50 @@ UITile.Layer.prototype.drawIsometric = function(canvas, rect) {
 	return;
 }
 
+UITile.Layer.prototype.drawHexagonal = function(canvas, rect) {
+    var top = rect.y;
+	var left = rect.x;
+	var right = left + rect.w;
+	var bottom = top + rect.h;
+
+	var i = 0;
+	var info = this.info;
+	var x = info.x || 0;
+	var y = info.y || 0;
+	var data = info.data;
+	var rows = info.height;
+	var cols = info.width;
+	var tile = this.tile;
+	var tileW = tile.tileWidth;
+	var tileH = tile.tileHeight;
+
+	canvas.globalAlpha = info.opacity;
+
+	var originY = y;
+	var originX = x;
+	var rect = {x:x, y:y, w:tileW, h:tileH};
+
+	for(var r = 0; r < rows; r++) {
+	    y = r*tileH/2 + originY;
+		for(var c = 0; c < cols; c++, i++) {
+			var imgIndex = data[i]
+            if(!imgIndex) {
+                continue;
+            }
+			x = c*tileW + originX;
+            if(r%2 > 0) x += tileW/2;
+			if(x > right || y > bottom || (x + tileW) < left || (y + tileH) < top) {
+				continue;
+			}
+			rect.x = x;
+			rect.y = y;
+			tile.drawTile(canvas, rect, imgIndex);
+		}
+	}
+
+	return;
+}
+
 UITile.Layer.prototype.draw = function(canvas, rect) {
 	var info = this.info;
 
@@ -45404,6 +46263,11 @@ UITile.Layer.prototype.draw = function(canvas, rect) {
 			this.drawIsometric(canvas, rect);
 			break;
 		}
+        case 'staggered':
+        case 'hexagonal': {
+            this.drawHexagonal(canvas, rect);
+            break;
+        }
 		default: {
 			throw new Error('unknow orientation: ', this.tile.orientation);
 		}
@@ -45577,7 +46441,7 @@ UITile.prototype.loadJSON = function(url, json) {
 
 UITile.prototype.loadURL = function(url) {
 	var me = this;
-   
+
     ResLoader.loadJson(url, function(json) {
 	    me.loadJSON(url, json);
     });
@@ -45653,7 +46517,7 @@ UITile.prototype.draw = function(canvas, rect) {
 	var n = layers.length;
 
 	for(var i = 0; i < n; i++) {
-		layers[i].draw(canvas, rect);	
+		layers[i].draw(canvas, rect);
 	}
 
 	return;
@@ -45680,7 +46544,7 @@ UITile.prototype.createBody = function(world, name, x, y, w, h, prop) {
 	if(prop.isSensor) {
 		fixtureDef.isSensor = true;
 	}
-		
+
 	fixtureDef.shape = new b2PolygonShape();
 	fixtureDef.shape.SetAsBox(Physics.toMeter(hw), Physics.toMeter(hh));
 
@@ -45731,7 +46595,7 @@ UITile.prototype.createBodies = function(world) {
 		var layer = layers[i];
 		var prop = layer.info.properties;
 		if(prop && prop.physics) {
-			this.createLayerBodies(world, i, layer.info);	
+			this.createLayerBodies(world, i, layer.info);
 		}
 	}
 
@@ -45748,7 +46612,7 @@ UITile.prototype.setTiledJsonURL = function(url) {
 }
 
 UITile.prototype.getTiledJsonURL = function() {
-	return this.dataURL || this.tiledJsonURL;	
+	return this.dataURL || this.tiledJsonURL;
 }
 
 UITile.prototype.setEnable = function(enable) {
@@ -45776,13 +46640,13 @@ UITile.prototype.setEnable = function(enable) {
 
 function UITileCreator() {
 	var args = ["ui-tile", "ui-tile", null, 1];
-	
+
 	ShapeCreator.apply(this, args);
 	this.createShape = function(createReason) {
 		var g = new UITile();
 		return g.initUITile(this.type, 200, 200);
 	}
-	
+
 	return;
 }
 
@@ -47254,7 +48118,6 @@ CanTK.isTizen = isTizen;
 CanTK.isMobile = isMobile;
 CanTK.isAndroid = isAndroid;
 CanTK.isFirefoxOS = isFirefoxOS;
-CanTK.delayLoadScripts = delayLoadScripts;
 CanTK.initViewPort = cantkInitViewPort;
 CanTK.restoreViewPort = cantkRestoreViewPort;
 CanTK.httpGetURL = httpGetURL;

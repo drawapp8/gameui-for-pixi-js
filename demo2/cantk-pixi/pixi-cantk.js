@@ -11,17 +11,23 @@ PIXI.CanTK = {};
 PIXI.CanTK.App = {};
 PIXI.CanTK.wins = [];
 
+UIWindowManager.soundMusic = {};
+UIWindowManager.soundEffects = {};
+		
 PIXI.CanTK.init = function(game, uiData) {
 	PIXI.CanTK.game = game;
 	PIXI.CanTK.uiData = uiData;
+	PIXI.Widget.setMeta(uiData.meta);
+
 	var wmData = PIXI.CanTK.uiData.wm;
 	wmData.images = {};
 	var wm = CanTK.createElementWithJson(wmData);
 	wm.setSize(game.width, game.height);
 	wm.relayout();
 	wm.setApp(PIXI.CanTK.App);
-	PIXI.CanTK.wm = wm;
+	wm.setView(PIXI.Widget.create(game, wm, 0, 0));
 
+	PIXI.CanTK.wm = wm;
 	wm.openWindowOrg = wm.openWindow;
 	wm.openWindow = function(name, onClose, closeCurrent, initData, options) {
 		this.openWindowOrg(name, onClose, closeCurrent, initData, options);
@@ -43,6 +49,7 @@ PIXI.CanTK.init = function(game, uiData) {
 	}
 
 	wm.loadAssets();
+	wm.loadAudios();
 
 	return;
 }
@@ -107,3 +114,8 @@ PIXI.CanTK.openWindow = function(name, x, y, w, h, onWindowClose, initData) {
 
 	return null;
 }
+
+PIXI.CanTK.isMobile = isMobile;
+PIXI.CanTK.getViewPort = cantkGetViewPort;
+PIXI.CanTK.initViewPort = cantkInitViewPort;
+

@@ -15,6 +15,14 @@ PIXI.Widget = function(game, x, y) {
     this.resolution = 1;
     this.canvas = document.createElement('canvas');
     this.context = this.canvas.getContext('2d');
+	
+	this.context.clipRect = function(x, y, w, h) {
+		this.beginPath();
+		this.rect(x, y, w, h);
+		this.clip();
+		this.beginPath();
+	}
+
     var texture = PIXI.Texture.fromCanvas(this.canvas);
     texture.trim = new PIXI.Rectangle();
 	this.hitArea = new PIXI.Rectangle();
@@ -221,4 +229,12 @@ PIXI.Widget.prototype.enableInput = function(sprite, pointer) {
 	this.interactive = true;
 	
 	return;
+}
+
+PIXI.Widget.setMeta = function(meta) {
+	PIXI.Widget.meta = meta;
+}
+
+PIXI.Widget.prototype.getMeta = function() {
+	return PIXI.Widget.meta;
 }

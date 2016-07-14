@@ -1,7 +1,22 @@
 var game;
 var choosedLabel;
+
+function initRenderer(w, h) {
+	var renderer = PIXI.autoDetectRenderer(w, h, {backgroundColor : 0x1099bb});
+	document.body.appendChild(renderer.view);
+	
+	if(PIXI.CanTK.isMobile()) {
+		PIXI.CanTK.initViewPort();
+		var viewPort = PIXI.CanTK.getViewPort();
+		renderer.view.style.width = viewPort.width + "px";
+		renderer.view.style.height = viewPort.width * renderer.height/renderer.width + "px";
+	}
+
+	return renderer;
+}
+
 function gameStart() {	
-	var renderer = PIXI.autoDetectRenderer(480, 854,{backgroundColor : 0x1099bb});
+	var renderer = initRenderer(480, 854);
 	document.body.appendChild(renderer.view);
 
 	// create the root of the scene graph
